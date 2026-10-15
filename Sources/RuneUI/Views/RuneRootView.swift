@@ -881,6 +881,8 @@ enum PodTableLayout {
     static let statusTextWidth: CGFloat = 94
     static let statusHorizontalPadding: CGFloat = 8
     static let statusTotalWidth: CGFloat = statusTextWidth + (statusHorizontalPadding * 2)
+    static let nodeWidth: CGFloat = 160
+    static let podIPWidth: CGFloat = 136
     static let headerHorizontalInset: CGFloat = rowHorizontalPadding
     static let selectionColumnWidth: CGFloat = 30
     static let favoriteColumnWidth: CGFloat = 34
@@ -901,6 +903,8 @@ enum PodTableLayout {
                 + nameColumnFrameWidth(nameColumnWidth)
                 + metricsColumnGroupWidth
                 + statusTotalWidth
+                + nodeWidth
+                + podIPWidth
                 + favoriteColumnWidth
                 + (metricsSpacing * 4)
         )
@@ -926,6 +930,8 @@ enum PodTableLayout {
             + restartsWidth
             + ageWidth
             + statusTotalWidth
+            + nodeWidth
+            + podIPWidth
             + favoriteColumnWidth
     }
 }
@@ -4118,7 +4124,49 @@ public struct RuneRootView: View {
         }
     }
 
+    private var isPodBrowser: Bool {
+        viewModel.state.selectedSection == .workloads && viewModel.state.selectedWorkloadKind == .pod
+    }
+
+    @ViewBuilder
     private var contentHeader: some View {
+        if isPodBrowser, hasAvailableKubernetesContexts {
+            podBrowserHeader
+        } else {
+            standardContentHeader
+        }
+    }
+
+    private var podBrowserHeader: some View {
+        VStack(alignment: .leading, spacing: RuneUILayoutMetrics.contentControlSpacing) {
+            RunePodBrowserHeading(
+                context: viewModel.state.selectedContext?.name ?? "—",
+                namespace: viewModel.state.selectedNamespace,
+                visibleCount: viewModel.visiblePods.count,
+                totalCount: viewModel.state.pods.count,
+                isLoading: viewModel.state.isLoading,
+                isLive: $viewModel.isLiveStatusUpdatesEnabled
+            )
+
+            if viewModel.isProductionContext || viewModel.state.isReadOnlyMode {
+                HStack(spacing: 8) {
+                    if viewModel.isProductionContext { productionBanner }
+                    if viewModel.state.isReadOnlyMode {
+                        Label("Read-only", systemImage: "lock.fill")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.runeSecondary)
+                    }
+                }
+            }
+
+            resourceFamilyControlRow
+            resourceListToolbar
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RuneRootLayoutProbe(kind: .header, generation: layoutGeneration))
+    }
+
+    private var standardContentHeader: some View {
         VStack(alignment: .leading, spacing: RuneUILayoutMetrics.contentControlSpacing) {
             RuneAdaptiveToolbar("Content header") {
                 HStack(spacing: 8) {
@@ -4296,19 +4344,29 @@ public struct RuneRootView: View {
             viewModel.setWorkloadKind(kind)
         })
 
-        return RuneSegmentedPickerInScroll(
-            "Resource type",
-            selection: selection,
-            labelsHidden: true
-        ) {
-            ForEach(kinds) { kind in
-                Text(kind.localizedTitle(appString)).tag(kind)
+        return Group {
+            if isPodBrowser {
+                RuneBrowserTabBar(
+                    options: kinds.map { (value: $0, title: $0.localizedTitle(appString)) },
+                    selection: selection,
+                    accessibilityLabel: "Resource type"
+                )
+            } else {
+                RuneSegmentedPickerInScroll(
+                    "Resource type",
+                    selection: selection,
+                    labelsHidden: true
+                ) {
+                    ForEach(kinds) { kind in
+                        Text(kind.localizedTitle(appString)).tag(kind)
+                    }
+                }
+                .controlSize(resourceListControlSize)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityLabel("Resource type")
+                .runeHelp("Choose which Kubernetes resource type appears in the table.", enabled: showHoverTooltips)
             }
         }
-        .controlSize(resourceListControlSize)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityLabel("Resource type")
-        .runeHelp("Choose which Kubernetes resource type appears in the table.", enabled: showHoverTooltips)
     }
 
     private var helmBrowserPicker: some View {
@@ -4995,56 +5053,83 @@ public struct RuneRootView: View {
         switch viewModel.state.selectedWorkloadKind {
         case .pod:
             let pods = viewModel.visiblePods
-            resourceListGate(kindTitle: "Pods", visibleCount: pods.count) {
-                AppKitPodTableView(
-                    pods: pods,
-                    selectedPodID: viewModel.state.selectedPod?.id,
-                    selectionRevision: viewModel.state.resourceSelectionRevision(for: .resource(.pod)),
-                    selectionRevisionAfterSelect: {
-                        viewModel.state.resourceSelectionRevision(for: .resource(.pod))
-                    },
-                    selectedPodIDs: viewModel.state.selectedPodIDs,
-                    sortColumn: viewModel.podSortColumn,
-                    sortAscending: viewModel.podSortAscending,
-                    nameColumnWidth: podNameColumnWidth,
-                    canApplyClusterMutations: viewModel.canApplyClusterMutations,
-                    isFavorite: { pod in
-                        viewModel.isFavoriteResource(kind: .pod, namespace: pod.namespace, name: pod.name)
-                    },
-                    onSelectPod: viewModel.selectPod,
-                    onToggleBulkSelection: viewModel.togglePodBulkSelection,
-                    onToggleSort: viewModel.togglePodSort,
-                    onNameColumnWidthChanged: commitPodNameColumnWidth,
-                    onToggleFavorite: { pod in
-                        viewModel.toggleFavoriteResource(kind: .pod, namespace: pod.namespace, name: pod.name)
-                    },
-                    onOpenLogs: { pod in
-                        viewModel.selectPod(pod)
-                        podInspectorTab = .logs
-                        viewModel.reloadLogsForSelection()
-                    },
-                    onOpenExec: { pod in
-                        viewModel.selectPod(pod)
-                        podInspectorTab = .exec
-                    },
-                    onOpenDescribe: { pod in
-                        viewModel.selectPod(pod)
-                        podInspectorTab = .describe
-                    },
-                    onOpenYAML: { pod in
-                        viewModel.selectPod(pod)
-                        podInspectorTab = .yaml
-                    },
-                    onDelete: { pod in
-                        viewModel.requestDeleteResource(kind: .pod, name: pod.name)
+            VStack(spacing: 0) {
+                resourceListGate(kindTitle: "Pods", visibleCount: pods.count) {
+                    AppKitPodTableView(
+                        pods: pods,
+                        selectedPodID: viewModel.state.selectedPod?.id,
+                        selectionRevision: viewModel.state.resourceSelectionRevision(for: .resource(.pod)),
+                        selectionRevisionAfterSelect: {
+                            viewModel.state.resourceSelectionRevision(for: .resource(.pod))
+                        },
+                        selectedPodIDs: viewModel.state.selectedPodIDs,
+                        sortColumn: viewModel.podSortColumn,
+                        sortAscending: viewModel.podSortAscending,
+                        nameColumnWidth: podNameColumnWidth,
+                        canApplyClusterMutations: viewModel.canApplyClusterMutations,
+                        isFavorite: { pod in
+                            viewModel.isFavoriteResource(kind: .pod, namespace: pod.namespace, name: pod.name)
+                        },
+                        onSelectPod: viewModel.selectPod,
+                        onToggleBulkSelection: viewModel.togglePodBulkSelection,
+                        onToggleSort: viewModel.togglePodSort,
+                        onNameColumnWidthChanged: commitPodNameColumnWidth,
+                        onToggleFavorite: { pod in
+                            viewModel.toggleFavoriteResource(kind: .pod, namespace: pod.namespace, name: pod.name)
+                        },
+                        onOpenLogs: { pod in
+                            viewModel.selectPod(pod)
+                            podInspectorTab = .logs
+                            viewModel.reloadLogsForSelection()
+                        },
+                        onOpenExec: { pod in
+                            viewModel.selectPod(pod)
+                            podInspectorTab = .exec
+                        },
+                        onOpenDescribe: { pod in
+                            viewModel.selectPod(pod)
+                            podInspectorTab = .describe
+                        },
+                        onOpenYAML: { pod in
+                            viewModel.selectPod(pod)
+                            podInspectorTab = .yaml
+                        },
+                        onDelete: { pod in
+                            viewModel.requestDeleteResource(kind: .pod, name: pod.name)
+                        }
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .transaction { transaction in
+                        transaction.animation = nil
                     }
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .transaction { transaction in
-                    transaction.animation = nil
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                Divider().opacity(0.35)
+                HStack(spacing: 8) {
+                    if let freshness = currentResourceListFreshness {
+                        Circle()
+                            .fill(ResourceListFreshnessPresentation.color(for: freshness.status, palette: activeAppearanceTheme.palette))
+                            .frame(width: 5, height: 5)
+                            .accessibilityHidden(true)
+                        Text(ResourceListFreshnessPresentation.text(for: freshness.status))
+                            .help(freshness.message)
+                    }
+                    Spacer(minLength: 4)
+                    Text(viewModel.state.selectedPodIDs.isEmpty
+                         ? "\(pods.count) Pods"
+                         : "\(viewModel.state.selectedPodIDs.count) selected · \(pods.count) Pods")
+                        .monospacedDigit()
+                }
+                .font(.caption).foregroundStyle(.runeSecondary)
+                .padding(.horizontal, 12).padding(.vertical, 8)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(editorFill)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay {
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(Color(nsColor: .separatorColor).opacity(0.3), lineWidth: 1)
+                    .allowsHitTesting(false)
+            }
             .id("workloads:pods")
 
         case .deployment:
@@ -5370,7 +5455,7 @@ public struct RuneRootView: View {
     private var detailPane: some View {
         VStack(alignment: .leading, spacing: 12) {
             ZStack(alignment: .topLeading) {
-                RoundedRectangle(cornerRadius: RuneUILayoutMetrics.paneShellCornerRadius, style: .continuous)
+                RoundedRectangle(cornerRadius: isPodBrowser ? 0 : RuneUILayoutMetrics.paneShellCornerRadius, style: .continuous)
                     .fill(panelFill)
 
                 Group {
@@ -5396,18 +5481,18 @@ public struct RuneRootView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .padding(RuneUILayoutMetrics.paneInnerPadding)
+                .padding(isPodBrowser ? RuneUILayoutMetrics.paneOuterPadding : RuneUILayoutMetrics.paneInnerPadding)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .clipShape(RoundedRectangle(cornerRadius: RuneUILayoutMetrics.paneShellCornerRadius, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: isPodBrowser ? 0 : RuneUILayoutMetrics.paneShellCornerRadius, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: RuneUILayoutMetrics.paneShellCornerRadius, style: .continuous)
-                    .strokeBorder(Color(nsColor: .separatorColor).opacity(0.16), lineWidth: 1)
+                    .strokeBorder(Color(nsColor: .separatorColor).opacity(isPodBrowser ? 0 : 0.16), lineWidth: 1)
             }
         }
         // `minWidth: 0` lets split columns shrink correctly; without it, nested scroll views can force odd horizontal alignment.
         .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .padding(RuneUILayoutMetrics.paneOuterPadding)
+        .padding(isPodBrowser ? 0 : RuneUILayoutMetrics.paneOuterPadding)
         .background {
             ZStack(alignment: .leading) {
                 RuneGlassPaneSurface(role: .inspector)
@@ -6045,16 +6130,11 @@ public struct RuneRootView: View {
                         podInspectorCoreInfo(pod)
                     },
                     tabs: {
-                    RuneSegmentedPickerInScroll(
-                        "",
+                    RuneBrowserTabBar(
+                        options: PodInspectorTab.allCases.map { (value: $0, title: $0.localizedTitle(appString)) },
                         selection: $podInspectorTab,
-                        labelsHidden: true
-                    ) {
-                        ForEach(PodInspectorTab.allCases) { tab in
-                            Text(tab.localizedTitle(appString)).tag(tab)
-                        }
-                    }
-                    .accessibilityLabel("Inspector")
+                        accessibilityLabel: "Inspector"
+                    )
                     },
                     actions: {
                         Button("Delete", role: .destructive) {
@@ -9685,11 +9765,8 @@ public struct RuneRootView: View {
 
     private func podOverviewSection(pod: PodSummary) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            podOverviewRow(title: "Ready", value: pod.containersReady ?? "—", symbol: "checkmark.circle")
             podOverviewRow(title: "Restarts", value: "\(pod.totalRestarts)", symbol: "arrow.clockwise")
             podOverviewRow(title: "Age", value: pod.ageDescription, symbol: "clock")
-            podOverviewRow(title: "CPU", value: pod.cpuDisplay, symbol: "cpu")
-            podOverviewRow(title: "Memory", value: pod.memoryDisplay, symbol: "memorychip")
             Divider()
                 .opacity(0.45)
             podOverviewRow(title: "Node", value: pod.nodeName ?? "—", symbol: "server.rack")
@@ -9724,12 +9801,7 @@ public struct RuneRootView: View {
     }
 
     private func podInspectorCoreInfo(_ pod: PodSummary) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if shouldShowResourceNamespaceLabel(pod.namespace) {
-                inspectorInfoRow("Namespace", value: pod.namespace, symbol: "square.stack.3d.up")
-            }
-            inspectorInfoRow("Status", value: pod.status, symbol: "waveform.path.ecg")
-        }
+        RunePodInspectorSummary(pod: pod)
     }
 
     private func podOverviewRow(title: String, value: String, symbol: String) -> some View {

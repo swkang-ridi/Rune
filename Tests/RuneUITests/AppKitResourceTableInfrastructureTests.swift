@@ -1564,7 +1564,8 @@ final class AppKitResourceTableInfrastructureTests: XCTestCase {
         let operatorResource = RuneAppKitResourceListLayout.operatorColumnWidths(visibleWidth: visibleWidth)
 
         XCTAssertEqual(
-            pod.selection + pod.name + pod.cpu + pod.memory + pod.restarts + pod.age + pod.status + pod.favorite,
+            pod.selection + pod.name + pod.cpu + pod.memory + pod.restarts + pod.age + pod.status
+                + pod.node + pod.podIP + pod.favorite,
             expected,
             accuracy: 0.5
         )

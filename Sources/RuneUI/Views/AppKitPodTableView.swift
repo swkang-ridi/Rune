@@ -257,6 +257,8 @@ enum RuneAppKitResourceListLayout {
         restarts: CGFloat,
         age: CGFloat,
         status: CGFloat,
+        node: CGFloat,
+        podIP: CGFloat,
         favorite: CGFloat
     ) {
         let cpuMinimum = max(
@@ -289,23 +291,27 @@ enum RuneAppKitResourceListLayout {
                     maximum: PodTableLayout.nameColumnMaximumWidth,
                     growthWeight: 3
                 ),
+                ColumnRule(minimum: statusMinimum, ideal: max(statusMinimum, 118), maximum: 240, growthWeight: 1),
+                ColumnRule(minimum: PodTableLayout.nodeWidth, ideal: 200, maximum: 400, growthWeight: 1.5),
+                ColumnRule(minimum: PodTableLayout.podIPWidth, ideal: 150, maximum: 360, growthWeight: 1),
                 ColumnRule(minimum: cpuMinimum, ideal: max(cpuMinimum, 78), maximum: 160, growthWeight: 0.7),
                 ColumnRule(minimum: memoryMinimum, ideal: max(memoryMinimum, 86), maximum: 180, growthWeight: 0.8),
                 ColumnRule(minimum: restartsMinimum, ideal: max(restartsMinimum, 108), maximum: 180, growthWeight: 0.9),
                 ColumnRule(minimum: ageMinimum, ideal: max(ageMinimum, 82), maximum: 140, growthWeight: 0.6),
-                ColumnRule(minimum: statusMinimum, ideal: max(statusMinimum, 118), maximum: 240, growthWeight: 1),
                 .fixed(PodTableLayout.favoriteColumnWidth)
             ]
         )
         return (
             selection: widths[0],
             name: widths[1],
-            cpu: widths[2],
-            memory: widths[3],
-            restarts: widths[4],
-            age: widths[5],
-            status: widths[6],
-            favorite: widths[7]
+            cpu: widths[5],
+            memory: widths[6],
+            restarts: widths[7],
+            age: widths[8],
+            status: widths[2],
+            node: widths[3],
+            podIP: widths[4],
+            favorite: widths[9]
         )
     }
 
@@ -1709,6 +1715,28 @@ struct AppKitPodTableView: NSViewRepresentable {
                     lineBreakMode: .byTruncatingMiddle
                 )
 
+            case .node:
+                return resourceTableLabelCell(
+                    in: tableView,
+                    column: tableColumn,
+                    text: pod.nodeName ?? "—",
+                    font: .systemFont(ofSize: NSFont.smallSystemFontSize),
+                    alignment: .left,
+                    tooltip: pod.nodeName,
+                    lineBreakMode: .byTruncatingMiddle
+                )
+
+            case .podIP:
+                return resourceTableLabelCell(
+                    in: tableView,
+                    column: tableColumn,
+                    text: pod.podIP ?? "—",
+                    font: metricsFont,
+                    alignment: .left,
+                    tooltip: pod.podIP,
+                    lineBreakMode: .byTruncatingMiddle
+                )
+
             case .cpu:
                 return resourceTableLabelCell(
                     in: tableView,
@@ -2057,6 +2085,8 @@ struct AppKitPodTableView: NSViewRepresentable {
                 .restarts: widths.restarts,
                 .age: widths.age,
                 .status: widths.status,
+                .node: widths.node,
+                .podIP: widths.podIP,
                 .favorite: widths.favorite
             ]
 
@@ -6696,11 +6726,13 @@ private enum OperatorResourceColumn: String, CaseIterable {
 private enum PodColumn: String, CaseIterable {
     case selection
     case name
+    case status
+    case node
+    case podIP
     case cpu
     case memory
     case restarts
     case age
-    case status
     case favorite
 
     init?(sortColumn: PodListSortColumn) {
@@ -6722,7 +6754,7 @@ private enum PodColumn: String, CaseIterable {
         case .restarts: return .restarts
         case .age: return .age
         case .status: return .status
-        case .selection, .favorite: return nil
+        case .selection, .favorite, .node, .podIP: return nil
         }
     }
 
@@ -6747,6 +6779,8 @@ private enum PodColumn: String, CaseIterable {
         switch self {
         case .selection: return ""
         case .name: return "Name"
+        case .node: return "Node"
+        case .podIP: return "Pod IP"
         case .cpu: return "CPU"
         case .memory: return "MEM"
         case .restarts: return "Restarts"
@@ -6762,7 +6796,7 @@ private enum PodColumn: String, CaseIterable {
             return .right
         case .status:
             return .center
-        case .selection, .favorite, .name:
+        case .selection, .favorite, .name, .node, .podIP:
             return .left
         }
     }
@@ -6771,6 +6805,8 @@ private enum PodColumn: String, CaseIterable {
         switch self {
         case .selection: return PodTableLayout.selectionColumnWidth
         case .name: return PodTableLayout.clampedNameColumnWidth(nameColumnWidth)
+        case .node: return PodTableLayout.nodeWidth
+        case .podIP: return PodTableLayout.podIPWidth
         case .cpu: return PodTableLayout.cpuWidth
         case .memory: return PodTableLayout.memoryWidth
         case .restarts: return PodTableLayout.restartsWidth
@@ -6792,6 +6828,11 @@ private enum PodColumn: String, CaseIterable {
                 width(nameColumnWidth: PodTableLayout.nameColumnDefaultWidth),
                 RuneAppKitResourceListLayout.minimumHeaderColumnWidth(title: title, reservesSortIndicator: true)
             )
+        case .node, .podIP:
+            return max(
+                width(nameColumnWidth: PodTableLayout.nameColumnDefaultWidth),
+                RuneAppKitResourceListLayout.minimumHeaderColumnWidth(title: title, reservesSortIndicator: false)
+            )
         case .selection, .favorite:
             return width(nameColumnWidth: PodTableLayout.nameColumnDefaultWidth)
         }
@@ -6805,6 +6846,8 @@ private enum PodColumn: String, CaseIterable {
         case .restarts: return 180
         case .age: return 140
         case .status: return 240
+        case .node: return 600
+        case .podIP: return 420
         case .selection, .favorite:
             return width(nameColumnWidth: PodTableLayout.nameColumnDefaultWidth)
         }
@@ -6813,7 +6856,7 @@ private enum PodColumn: String, CaseIterable {
     var isUserResizable: Bool {
         switch self {
         case .selection, .favorite: return false
-        case .name, .cpu, .memory, .restarts, .age, .status: return true
+        case .name, .cpu, .memory, .restarts, .age, .status, .node, .podIP: return true
         }
     }
 }

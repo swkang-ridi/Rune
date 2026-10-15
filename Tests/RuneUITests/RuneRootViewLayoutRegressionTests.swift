@@ -2859,6 +2859,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                 initialSidebarWidthOverride: 280,
                 initialDetailWidthOverride: 520
             )
+            .frame(width: windowWidth, height: 900)
         )
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: windowWidth, height: 900),
