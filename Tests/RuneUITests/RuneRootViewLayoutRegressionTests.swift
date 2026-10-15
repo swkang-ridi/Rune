@@ -4,6 +4,8 @@ import XCTest
 @testable import RuneCore
 @testable import RuneUI
 
+/// This suite explicitly hosts the docked inspector to compare column geometry.
+/// Separate Pod windows are covered by `PodInspectorWindowTests`.
 /// Layout probes (`RuneRootLayoutSnapshot`) record **minY** and **minX** in window space.
 /// Horizontal assertions catch sideways “offset” in the inspector/content when tabs or editors swap.
 /// Run the app with `RUNE_DEBUG_LAYOUT=1` to log probe coordinates to the console.
@@ -28,6 +30,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                             viewModel: viewModel,
                             onLayoutSnapshotChange: capture,
                             debugDisableBootstrap: true,
+                            podInspectorPresentation: .docked,
                             initialPodInspectorTab: .overview,
                             shellVariant: shellVariant,
                             manifestInlineEditorImplementation: editorImplementation
@@ -43,6 +46,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                             viewModel: viewModel,
                             onLayoutSnapshotChange: capture,
                             debugDisableBootstrap: true,
+                            podInspectorPresentation: .docked,
                             initialPodInspectorTab: .describe,
                             shellVariant: shellVariant,
                             manifestInlineEditorImplementation: editorImplementation
@@ -73,6 +77,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                     viewModel: viewModel,
                     onLayoutSnapshotChange: capture,
                     debugDisableBootstrap: true,
+                    podInspectorPresentation: .docked,
                     initialPodInspectorTab: .overview,
                     shellVariant: .appKitSplitView,
                     initialSidebarWidthOverride: 280,
@@ -90,6 +95,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                     viewModel: viewModel,
                     onLayoutSnapshotChange: capture,
                     debugDisableBootstrap: true,
+                    podInspectorPresentation: .docked,
                     initialPodInspectorTab: .overview,
                     shellVariant: .appKitSplitView,
                     initialSidebarWidthOverride: 280,
@@ -122,6 +128,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                     viewModel: viewModel,
                     onLayoutSnapshotChange: capture,
                     debugDisableBootstrap: true,
+                    podInspectorPresentation: .docked,
                     initialPodInspectorTab: .overview,
                     shellVariant: .appKitSplitView,
                     manifestInlineEditorImplementation: .swiftUITextEditor,
@@ -163,6 +170,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                     viewModel: viewModel,
                     onLayoutSnapshotChange: capture,
                     debugDisableBootstrap: true,
+                    podInspectorPresentation: .docked,
                     initialPodInspectorTab: .overview,
                     shellVariant: .appKitSplitView,
                     manifestInlineEditorImplementation: .swiftUITextEditor,
@@ -207,6 +215,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                             viewModel: viewModel,
                             onLayoutSnapshotChange: capture,
                             debugDisableBootstrap: true,
+                            podInspectorPresentation: .docked,
                             initialPodInspectorTab: .overview,
                             shellVariant: shellVariant,
                             manifestInlineEditorImplementation: editorImplementation
@@ -222,6 +231,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                             viewModel: viewModel,
                             onLayoutSnapshotChange: capture,
                             debugDisableBootstrap: true,
+                            podInspectorPresentation: .docked,
                             initialPodInspectorTab: .yaml,
                             shellVariant: shellVariant,
                             manifestInlineEditorImplementation: editorImplementation,
@@ -248,6 +258,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                             viewModel: viewModel,
                             onLayoutSnapshotChange: capture,
                             debugDisableBootstrap: true,
+                            podInspectorPresentation: .docked,
                             initialDeploymentInspectorTab: .overview,
                             shellVariant: shellVariant,
                             manifestInlineEditorImplementation: editorImplementation
@@ -263,6 +274,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                             viewModel: viewModel,
                             onLayoutSnapshotChange: capture,
                             debugDisableBootstrap: true,
+                            podInspectorPresentation: .docked,
                             initialDeploymentInspectorTab: .describe,
                             shellVariant: shellVariant,
                             manifestInlineEditorImplementation: editorImplementation
@@ -288,6 +300,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                             viewModel: viewModel,
                             onLayoutSnapshotChange: capture,
                             debugDisableBootstrap: true,
+                            podInspectorPresentation: .docked,
                             initialDeploymentInspectorTab: .overview,
                             shellVariant: shellVariant,
                             manifestInlineEditorImplementation: editorImplementation
@@ -303,6 +316,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                             viewModel: viewModel,
                             onLayoutSnapshotChange: capture,
                             debugDisableBootstrap: true,
+                            podInspectorPresentation: .docked,
                             initialDeploymentInspectorTab: .yaml,
                             shellVariant: shellVariant,
                             manifestInlineEditorImplementation: editorImplementation,
@@ -329,6 +343,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                             viewModel: viewModel,
                             onLayoutSnapshotChange: capture,
                             debugDisableBootstrap: true,
+                            podInspectorPresentation: .docked,
                             initialServiceInspectorTab: .overview,
                             shellVariant: shellVariant,
                             manifestInlineEditorImplementation: editorImplementation
@@ -344,6 +359,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                             viewModel: viewModel,
                             onLayoutSnapshotChange: capture,
                             debugDisableBootstrap: true,
+                            podInspectorPresentation: .docked,
                             initialServiceInspectorTab: .describe,
                             shellVariant: shellVariant,
                             manifestInlineEditorImplementation: editorImplementation
@@ -369,6 +385,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                             viewModel: viewModel,
                             onLayoutSnapshotChange: capture,
                             debugDisableBootstrap: true,
+                            podInspectorPresentation: .docked,
                             initialServiceInspectorTab: .overview,
                             shellVariant: shellVariant,
                             manifestInlineEditorImplementation: editorImplementation
@@ -384,6 +401,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                             viewModel: viewModel,
                             onLayoutSnapshotChange: capture,
                             debugDisableBootstrap: true,
+                            podInspectorPresentation: .docked,
                             initialServiceInspectorTab: .yaml,
                             shellVariant: shellVariant,
                             manifestInlineEditorImplementation: editorImplementation,
@@ -416,6 +434,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                             viewModel: viewModel,
                             onLayoutSnapshotChange: capture,
                             debugDisableBootstrap: true,
+                            podInspectorPresentation: .docked,
                             initialGenericResourceManifestTab: .yaml,
                             shellVariant: shellVariant,
                             manifestInlineEditorImplementation: editorImplementation,
@@ -433,6 +452,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                             viewModel: viewModel,
                             onLayoutSnapshotChange: capture,
                             debugDisableBootstrap: true,
+                            podInspectorPresentation: .docked,
                             initialGenericResourceManifestTab: .describe,
                             shellVariant: shellVariant,
                             manifestInlineEditorImplementation: editorImplementation
@@ -465,6 +485,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                             viewModel: viewModel,
                             onLayoutSnapshotChange: capture,
                             debugDisableBootstrap: true,
+                            podInspectorPresentation: .docked,
                             initialGenericResourceManifestTab: .yaml,
                             shellVariant: shellVariant,
                             manifestInlineEditorImplementation: editorImplementation,
@@ -482,6 +503,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                             viewModel: viewModel,
                             onLayoutSnapshotChange: capture,
                             debugDisableBootstrap: true,
+                            podInspectorPresentation: .docked,
                             initialGenericResourceManifestTab: .describe,
                             shellVariant: shellVariant,
                             manifestInlineEditorImplementation: editorImplementation
@@ -551,6 +573,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                     viewModel: viewModel,
                     onLayoutSnapshotChange: capture,
                     debugDisableBootstrap: true,
+                    podInspectorPresentation: .docked,
                     initialPodInspectorTab: .overview,
                     shellVariant: .appKitSplitView,
                     manifestInlineEditorImplementation: .swiftUITextEditor,
@@ -570,6 +593,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                     viewModel: viewModel,
                     onLayoutSnapshotChange: capture,
                     debugDisableBootstrap: true,
+                    podInspectorPresentation: .docked,
                     initialPodInspectorTab: .overview,
                     shellVariant: .appKitSplitView,
                     manifestInlineEditorImplementation: .swiftUITextEditor,
@@ -612,6 +636,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                     viewModel: viewModel,
                     onLayoutSnapshotChange: capture,
                     debugDisableBootstrap: true,
+                    podInspectorPresentation: .docked,
                     initialPodInspectorTab: .overview,
                     shellVariant: .appKitSplitView,
                     manifestInlineEditorImplementation: .swiftUITextEditor,
@@ -631,6 +656,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                     viewModel: viewModel,
                     onLayoutSnapshotChange: capture,
                     debugDisableBootstrap: true,
+                    podInspectorPresentation: .docked,
                     initialPodInspectorTab: .overview,
                     shellVariant: .appKitSplitView,
                     manifestInlineEditorImplementation: .swiftUITextEditor,
@@ -704,6 +730,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                 viewModel: makePodViewModel(pod: pod),
                 onLayoutSnapshotChange: nil,
                 debugDisableBootstrap: true,
+                podInspectorPresentation: .docked,
                 debugDisableLayoutPersistence: false,
                 initialPodInspectorTab: .overview,
                 shellVariant: .appKitSplitView,
@@ -764,6 +791,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                             viewModel: viewModel,
                             onLayoutSnapshotChange: capture,
                             debugDisableBootstrap: true,
+                            podInspectorPresentation: .docked,
                             shellVariant: shellVariant
                         )
                     },
@@ -781,6 +809,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                             viewModel: viewModel,
                             onLayoutSnapshotChange: capture,
                             debugDisableBootstrap: true,
+                            podInspectorPresentation: .docked,
                             shellVariant: shellVariant
                         )
                     },
@@ -805,6 +834,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                         snapshots.append(snapshot)
                     },
                     debugDisableBootstrap: true,
+                    podInspectorPresentation: .docked,
                     shellVariant: shellVariant
                 )
             )
@@ -1224,6 +1254,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                                 viewModel: viewModel,
                                 onLayoutSnapshotChange: capture,
                                 debugDisableBootstrap: true,
+                                podInspectorPresentation: .docked,
                                 shellVariant: shellVariant
                             )
                         },
@@ -1250,6 +1281,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                         snapshots.append(snapshot)
                     },
                     debugDisableBootstrap: true,
+                    podInspectorPresentation: .docked,
                     shellVariant: shellVariant
                 )
             )
@@ -1308,6 +1340,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                             viewModel: viewModel,
                             onLayoutSnapshotChange: capture,
                             debugDisableBootstrap: true,
+                            podInspectorPresentation: .docked,
                             initialPodInspectorTab: .overview,
                             shellVariant: shellVariant
                         )
@@ -1323,6 +1356,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                             viewModel: viewModel,
                             onLayoutSnapshotChange: capture,
                             debugDisableBootstrap: true,
+                            podInspectorPresentation: .docked,
                             initialPodInspectorTab: .overview,
                             shellVariant: shellVariant
                         )
@@ -1347,6 +1381,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                         snapshots.append(snapshot)
                     },
                     debugDisableBootstrap: true,
+                    podInspectorPresentation: .docked,
                     initialPodInspectorTab: .overview,
                     shellVariant: shellVariant
                 )
@@ -1424,6 +1459,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                             viewModel: viewModel,
                             onLayoutSnapshotChange: capture,
                             debugDisableBootstrap: true,
+                            podInspectorPresentation: .docked,
                             initialPodInspectorTab: .overview,
                             shellVariant: shellVariant
                         )
@@ -1442,6 +1478,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                             viewModel: viewModel,
                             onLayoutSnapshotChange: capture,
                             debugDisableBootstrap: true,
+                            podInspectorPresentation: .docked,
                             initialPodInspectorTab: .overview,
                             shellVariant: shellVariant
                         )
@@ -1471,6 +1508,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                         snapshots.append(snapshot)
                     },
                     debugDisableBootstrap: true,
+                    podInspectorPresentation: .docked,
                     initialPodInspectorTab: .overview,
                     shellVariant: shellVariant
                 )
@@ -1583,6 +1621,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                 viewModel: viewModel,
                 onLayoutSnapshotChange: nil,
                 debugDisableBootstrap: true,
+                podInspectorPresentation: .docked,
                 initialPodInspectorTab: .overview,
                 shellVariant: .appKitSplitView,
                 initialSidebarWidthOverride: 280,
@@ -1668,6 +1707,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                             viewModel: viewModel,
                             onLayoutSnapshotChange: capture,
                             debugDisableBootstrap: true,
+                            podInspectorPresentation: .docked,
                             shellVariant: shellVariant
                         )
                     },
@@ -1684,6 +1724,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                             viewModel: viewModel,
                             onLayoutSnapshotChange: capture,
                             debugDisableBootstrap: true,
+                            podInspectorPresentation: .docked,
                             shellVariant: shellVariant
                         )
                     },
@@ -1705,6 +1746,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                             viewModel: viewModel,
                             onLayoutSnapshotChange: capture,
                             debugDisableBootstrap: true,
+                            podInspectorPresentation: .docked,
                             shellVariant: shellVariant
                         )
                     },
@@ -1728,6 +1770,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                         snapshots.append(snapshot)
                     },
                     debugDisableBootstrap: true,
+                    podInspectorPresentation: .docked,
                     shellVariant: shellVariant
                 )
             )
@@ -1853,6 +1896,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                             viewModel: viewModel,
                             onLayoutSnapshotChange: capture,
                             debugDisableBootstrap: true,
+                            podInspectorPresentation: .docked,
                             initialPodInspectorTab: .overview,
                             shellVariant: shellVariant
                         )
@@ -1872,6 +1916,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                             viewModel: viewModel,
                             onLayoutSnapshotChange: capture,
                             debugDisableBootstrap: true,
+                            podInspectorPresentation: .docked,
                             initialPodInspectorTab: .overview,
                             shellVariant: shellVariant
                         )
@@ -1897,6 +1942,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                             viewModel: viewModel,
                             onLayoutSnapshotChange: capture,
                             debugDisableBootstrap: true,
+                            podInspectorPresentation: .docked,
                             initialPodInspectorTab: .overview,
                             shellVariant: shellVariant
                         )
@@ -1925,6 +1971,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                         snapshots.append(snapshot)
                     },
                     debugDisableBootstrap: true,
+                    podInspectorPresentation: .docked,
                     initialPodInspectorTab: .overview,
                     shellVariant: shellVariant
                 )
@@ -2330,7 +2377,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
         kind: KubeResourceKind,
         sidebarWidth: Double = 280,
         detailWidth: Double = 440,
-        settleNanoseconds: UInt64 = 0
+        settleNanoseconds: UInt64 = 200_000_000
     ) async throws -> RuneRootLayoutSnapshot {
         prepareLayoutTestViewModel(viewModel)
         let defaults = UserDefaults.standard
@@ -2361,7 +2408,9 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
             rootView: rootView(viewModel) { snapshot in
                 snapshots.append(snapshot)
             }
+            .frame(width: 1440, height: 900)
         )
+        host.sizingOptions = []
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1440, height: 900),
@@ -2423,6 +2472,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                 viewModel: viewModel,
                 onLayoutSnapshotChange: nil,
                 debugDisableBootstrap: true,
+                podInspectorPresentation: .docked,
                 initialPodInspectorTab: initialPodInspectorTab,
                 shellVariant: .appKitSplitView,
                 manifestInlineEditorImplementation: .appKitTextView,
@@ -2532,6 +2582,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                 layoutSnapshots.append(snapshot)
             },
             debugDisableBootstrap: true,
+            podInspectorPresentation: .docked,
             shellVariant: shellVariant,
             initialSidebarWidthOverride: 280,
             initialDetailWidthOverride: 520
@@ -2855,6 +2906,7 @@ final class RuneRootViewLayoutRegressionTests: XCTestCase {
                     layoutSnapshots.append(snapshot)
                 },
                 debugDisableBootstrap: true,
+                podInspectorPresentation: .docked,
                 shellVariant: .appKitSplitView,
                 initialSidebarWidthOverride: 280,
                 initialDetailWidthOverride: 520

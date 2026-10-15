@@ -32,7 +32,7 @@ final class RuneFakeK8sRESTServerTests: XCTestCase {
                 && line.contains("watch=1")
                 && line.contains("allowWatchBookmarks=true")
                 && line.contains("resourceVersion=synthetic-1")
-                && line.contains("resourceVersionMatch=NotOlderThan")
+                && !line.contains("resourceVersionMatch=")
         })
     }
 

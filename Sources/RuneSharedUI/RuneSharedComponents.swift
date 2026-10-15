@@ -37,6 +37,7 @@ public struct RuneLargeTextSurface: View {
     private let scrollTargetLine: Int?
     private let scrollTargetRevision: Int?
     private let scrollsOnTargetLineChange: Bool
+    private let startsAtEndOfText: Bool
     private let searchMatchRanges: [NSRange]
     private let selectedSearchMatchIndex: Int
     private let horizontalContentInset: CGFloat
@@ -55,6 +56,7 @@ public struct RuneLargeTextSurface: View {
         scrollTargetLine: Int? = nil,
         scrollTargetRevision: Int? = nil,
         scrollsOnTargetLineChange: Bool = true,
+        startsAtEndOfText: Bool = false,
         searchMatchRanges: [NSRange] = [],
         selectedSearchMatchIndex: Int = 0,
         horizontalContentInset: CGFloat = 10,
@@ -68,6 +70,7 @@ public struct RuneLargeTextSurface: View {
         self.scrollTargetLine = scrollTargetLine
         self.scrollTargetRevision = scrollTargetRevision
         self.scrollsOnTargetLineChange = scrollsOnTargetLineChange
+        self.startsAtEndOfText = startsAtEndOfText
         self.searchMatchRanges = searchMatchRanges
         self.selectedSearchMatchIndex = selectedSearchMatchIndex
         self.horizontalContentInset = horizontalContentInset
@@ -83,6 +86,7 @@ public struct RuneLargeTextSurface: View {
         scrollTargetLine: Int? = nil,
         scrollTargetRevision: Int? = nil,
         scrollsOnTargetLineChange: Bool = true,
+        startsAtEndOfText: Bool = false,
         searchMatchRanges: [NSRange] = [],
         selectedSearchMatchIndex: Int = 0,
         horizontalContentInset: CGFloat = 10,
@@ -96,6 +100,7 @@ public struct RuneLargeTextSurface: View {
         self.scrollTargetLine = scrollTargetLine
         self.scrollTargetRevision = scrollTargetRevision
         self.scrollsOnTargetLineChange = scrollsOnTargetLineChange
+        self.startsAtEndOfText = startsAtEndOfText
         self.searchMatchRanges = searchMatchRanges
         self.selectedSearchMatchIndex = selectedSearchMatchIndex
         self.horizontalContentInset = horizontalContentInset
@@ -121,6 +126,7 @@ public struct RuneLargeTextSurface: View {
                         sparseContent(viewportHeight: viewportHeight)
                     }
                 }
+                .defaultScrollAnchor(startsAtEndOfText ? .bottomLeading : .topLeading)
                 .coordinateSpace(name: coordinateSpaceName)
                 .onPreferenceChange(RuneLargeTextVerticalOffsetPreferenceKey.self) { measuredOffset in
                     guard let measuredOffset, measuredOffset.isFinite else { return }

@@ -10,6 +10,53 @@ import XCTest
 
 @MainActor
 final class RuneFakeClusterViewModelIntegrationTests: XCTestCase {
+    func testPodListLoadsNodePoolsAndSupportsPoolSearch() async throws {
+        let source = RuneFakeK8sFixture.defaultContexts[0]
+        let nodes = source.nodes.enumerated().map { index, node in
+            RuneFakeK8sNode(
+                name: node.name, internalIP: node.internalIP, cpu: node.cpu, memory: node.memory,
+                labels: ["karpenter.sh/nodepool": "pool-\(index)"]
+            )
+        }
+        let fixture = RuneFakeK8sFixture(contexts: [RuneFakeK8sCluster(
+            contextName: source.contextName, defaultNamespace: source.defaultNamespace,
+            namespaces: source.namespaces, nodes: nodes, operatorResources: source.operatorResources
+        )])
+        let harness = try await makeHarness(fixture: fixture)
+        defer { harness.cleanup() }
+        harness.state.selectedSection = .workloads
+        harness.state.selectedWorkloadKind = .pod
+        try await harness.viewModel.reloadContexts()
+
+        XCTAssertEqual(harness.state.pods.count, 2)
+        XCTAssertEqual(harness.viewModel.nodePoolNamesByNode["orbit-node-a"], "pool-0")
+        XCTAssertEqual(harness.viewModel.nodePoolNamesByNode["orbit-node-b"], "pool-1")
+        for pod in harness.state.pods {
+            XCTAssertEqual(harness.viewModel.nodePoolName(for: pod), harness.viewModel.nodePoolNamesByNode[pod.nodeName ?? ""])
+        }
+        XCTAssertTrue(harness.server.requestLines().contains { $0.hasPrefix("GET /api/v1/nodes ") })
+        harness.state.resourceSearchQuery = "pool-0"
+        XCTAssertEqual(harness.viewModel.visiblePods.map(\.nodeName), ["orbit-node-a"])
+        harness.state.setNodes([])
+        XCTAssertTrue(harness.viewModel.visiblePods.isEmpty, "Pool search must update when Node metadata changes.")
+        XCTAssertNil(harness.state.lastError)
+    }
+
+    func testPodListStillLoadsWhenNodePoolLookupIsForbidden() async throws {
+        let fixture = RuneFakeK8sFixture(selfSubjectAccessReviewDenials: [
+            RuneFakeK8sRBACRule(namespace: nil, verb: "list", resource: "nodes")
+        ])
+        let harness = try await makeHarness(fixture: fixture)
+        defer { harness.cleanup() }
+        harness.state.selectedSection = .workloads
+        harness.state.selectedWorkloadKind = .pod
+        try await harness.viewModel.reloadContexts()
+
+        XCTAssertEqual(harness.state.pods.count, 2)
+        XCTAssertTrue(harness.viewModel.nodePoolNamesByNode.isEmpty)
+        XCTAssertNil(harness.state.lastError)
+    }
+
     func testDemoContextIsVisibleWithoutHijackingFakeClusterStartup() async throws {
         let previousDemoSetting = UserDefaults.standard.object(forKey: RuneSettingsKeys.enableDemoCluster)
         UserDefaults.standard.runeEnableDemoCluster = true
@@ -289,7 +336,7 @@ final class RuneFakeClusterViewModelIntegrationTests: XCTestCase {
         }
 
         XCTAssertEqual(harness.state.selectedSection, .terminal)
-        XCTAssertEqual(harness.state.pods.first?.status, "Pending")
+        XCTAssertEqual(harness.state.pods.first?.status, "ContainerCreating")
         XCTAssertNil(harness.state.lastError)
     }
 

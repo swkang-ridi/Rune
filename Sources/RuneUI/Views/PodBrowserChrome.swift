@@ -128,13 +128,7 @@ struct RunePodInspectorSummary: View {
     @Environment(\.runeThemePalette) private var palette
 
     private var statusColor: Color {
-        switch pod.status.lowercased() {
-        case "running", "succeeded", "completed", "ready": return RuneSemanticColorRole.success.color(in: palette)
-        case "pending", "terminating", "containercreating": return RuneSemanticColorRole.warning.color(in: palette)
-        case "failed", "error", "crashloopbackoff", "imagepullbackoff", "errimagepull", "createcontainerconfigerror":
-            return RuneSemanticColorRole.danger.color(in: palette)
-        default: return palette?.secondaryText ?? Color.secondary
-        }
+        RunePodStatusTone(status: pod.status).color(in: palette)
     }
 
     var body: some View {

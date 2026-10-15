@@ -449,6 +449,19 @@ public struct PodSummary: Identifiable, Hashable, Codable, Sendable {
             .filter { !$0.isEmpty } ?? []
     }
 
+    /// Replace metrics without discarding the latest status and scheduling information.
+    public func updatingResourceUsage(cpu: String?, memory: String?) -> PodSummary {
+        PodSummary(
+            name: name, namespace: namespace, status: status,
+            totalRestarts: totalRestarts, ageDescription: ageDescription,
+            cpuUsage: cpu, memoryUsage: memory, podIP: podIP, hostIP: hostIP,
+            nodeName: nodeName, qosClass: qosClass, containersReady: containersReady,
+            containerNamesLine: containerNamesLine, initContainerNamesLine: initContainerNamesLine,
+            ephemeralContainerNamesLine: ephemeralContainerNamesLine, labels: labels,
+            containerImagesLine: containerImagesLine, ownerReferencesLine: ownerReferencesLine
+        )
+    }
+
     /// Merge a detail fetch into the table row: keep list metrics and age, fill IP, node, QoS, and readiness from the richer snapshot.
     public func mergingInspectorDetail(_ detail: PodSummary) -> PodSummary {
         PodSummary(
@@ -657,6 +670,8 @@ public struct ClusterResourceSummary: Identifiable, Hashable, Codable, Sendable 
     public let primaryText: String
     public let secondaryText: String
     public let ownerReferencesLine: String?
+    /// Node pool or managed node group, resolved from the Node's provider labels.
+    public let nodePoolName: String?
 
     public init(
         kind: KubeResourceKind,
@@ -664,7 +679,8 @@ public struct ClusterResourceSummary: Identifiable, Hashable, Codable, Sendable 
         namespace: String?,
         primaryText: String,
         secondaryText: String,
-        ownerReferencesLine: String? = nil
+        ownerReferencesLine: String? = nil,
+        nodePoolName: String? = nil
     ) {
         self.kind = kind
         self.name = name
@@ -672,6 +688,7 @@ public struct ClusterResourceSummary: Identifiable, Hashable, Codable, Sendable 
         self.primaryText = primaryText
         self.secondaryText = secondaryText
         self.ownerReferencesLine = ownerReferencesLine
+        self.nodePoolName = nodePoolName
     }
 
     public var id: String {

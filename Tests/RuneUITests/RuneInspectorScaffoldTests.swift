@@ -5,6 +5,38 @@ import XCTest
 
 final class RuneInspectorScaffoldTests: XCTestCase {
     @MainActor
+    func testTopTabsStayAboveOverviewAndLogOutputUsesTheHeaderSpace() throws {
+        for showsIdentityAndInfo in [true, false] {
+            var latestSnapshot: RuneInspectorScaffoldLayoutSnapshot?
+            let host = NSHostingView(rootView: RuneInspectorScaffold(
+                title: "Pod", copyAccessibilityLabel: "Copy Pod name",
+                bodyScrollBehavior: .selfManaged, showsActions: false,
+                tabsAtTop: true, showsIdentityAndInfo: showsIdentityAndInfo,
+                onCopy: {}, onRefresh: {},
+                onLayoutSnapshotChange: { latestSnapshot = $0 },
+                info: { Text("Running · payments") },
+                tabs: { Text("Overview    Logs") },
+                actions: { EmptyView() },
+                content: { Color.clear }
+            ).frame(width: 1000, height: 800))
+            host.frame = NSRect(x: 0, y: 0, width: 1000, height: 800)
+            settle(host, until: { latestSnapshot != nil })
+            let snapshot = try XCTUnwrap(latestSnapshot)
+            let tabs = try XCTUnwrap(snapshot[.tabs])
+            let body = try XCTUnwrap(snapshot[.body])
+            XCTAssertLessThanOrEqual(tabs.minY, 1)
+            XCTAssertLessThanOrEqual(tabs.maxY, body.minY)
+            if showsIdentityAndInfo {
+                XCTAssertLessThanOrEqual(tabs.maxY, try XCTUnwrap(snapshot[.identity]).minY)
+            } else {
+                XCTAssertNil(snapshot[.identity])
+                XCTAssertNil(snapshot[.info])
+                XCTAssertGreaterThan(body.height, 740)
+            }
+        }
+    }
+
+    @MainActor
     func testVerticalBodyAddsOneVerticalViewportAndFitsMinimumInspectorWidth() {
         let host = hostingView(scrollBehavior: .vertical, width: 320, height: 584)
 

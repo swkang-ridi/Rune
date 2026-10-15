@@ -13,6 +13,7 @@ struct AppKitManifestTextView: NSViewRepresentable {
     @Binding var text: String
     var isEditable: Bool
     var resetScrollOnExternalChange = false
+    var followsEndOfText = false
     var contentStyle: ContentStyle = .plainText
     var externalValidationIssues: [YAMLValidationIssue] = []
     var navigationRequest: YAMLTextNavigationRequest?
@@ -94,10 +95,19 @@ struct AppKitManifestTextView: NSViewRepresentable {
             precomputedRanges: searchMatchRanges,
             navigationRevision: searchNavigationRevision
         )
+        if followsEndOfText {
+            // The viewport receives its size after the representable is mounted.
+            DispatchQueue.main.async { [weak textView] in
+                guard let textView else { return }
+                textView.refreshViewportGeometry()
+                scrollToEndVertically(textView)
+            }
+        }
         return scrollView
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        let startedFollowing = followsEndOfText && !context.coordinator.parent.followsEndOfText
         context.coordinator.parent = self
 
         guard let textView = scrollView.documentView as? PlainManifestTextView else { return }
@@ -111,7 +121,8 @@ struct AppKitManifestTextView: NSViewRepresentable {
             manifestTheme: resolvedTheme
         )
 
-        if textView.representedText != text {
+        let textChanged = textView.representedText != text
+        if textChanged {
             context.coordinator.isUpdatingFromSwiftUI = true
             textView.setStringKeepingSelection(text)
             context.coordinator.isUpdatingFromSwiftUI = false
@@ -135,6 +146,9 @@ struct AppKitManifestTextView: NSViewRepresentable {
             precomputedRanges: searchMatchRanges,
             navigationRevision: searchNavigationRevision
         )
+        if followsEndOfText, textChanged || startedFollowing {
+            scrollToEndVertically(textView)
+        }
         (scrollView as? ManifestTextScrollView)?.configureLineNumberGutter(
             textView: textView,
             isVisible: contentStyle == .yaml && showsLineNumbers
@@ -148,6 +162,18 @@ struct AppKitManifestTextView: NSViewRepresentable {
 
     private var clampedFontSize: CGFloat {
         CGFloat(RuneSettingsKeys.clampedTerminalFontSize(appFontSize))
+    }
+
+    private func scrollToEndVertically(_ textView: PlainManifestTextView) {
+        let scrollView = textView.enclosingScrollView
+        let horizontalOffset = scrollView?.contentView.bounds.minX ?? 0
+        textView.scrollRangeToVisible(NSRange(location: (textView.string as NSString).length, length: 0))
+        if let scrollView {
+            var origin = scrollView.contentView.bounds.origin
+            origin.x = horizontalOffset
+            scrollView.contentView.scroll(to: origin)
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
     }
 
     private func applyEditorRestorationIfNeeded(

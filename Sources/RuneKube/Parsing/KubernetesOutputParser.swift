@@ -128,9 +128,14 @@ public struct KubernetesOutputParser {
 
     /// Single Kubernetes Pod JSON document (same shape as a list item).
     public func parseSinglePodJSON(namespace: String, from raw: String) throws -> PodSummary {
-        let item = try JSONDecoder().decode(KubePodItem.self, from: Data(raw.utf8))
-        let ns = item.metadata.namespace ?? namespace
-        return podSummaryFromJSONItem(item, namespace: ns)
+        guard let item = try JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any] else {
+            throw RuneError.parseError(message: "Kubernetes Pod JSON must be an object.")
+        }
+        var ageCache: [String: String] = [:]
+        guard let pod = podSummaryFromJSONObject(item, defaultNamespace: namespace, allNamespaces: false, ageCache: &ageCache) else {
+            throw RuneError.parseError(message: "Kubernetes Pod JSON is missing its name.")
+        }
+        return pod
     }
 
     public func parsePodsListJSON(namespace: String, from raw: String) throws -> [PodSummary] {
@@ -305,6 +310,30 @@ public struct KubernetesOutputParser {
         return pods.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
+    private func podDisplayStatus(metadata: [String: Any], status: [String: Any]?) -> String {
+        let phase = nonEmpty(status?["phase"] as? String) ?? "Unknown"
+        if nonEmpty(metadata["deletionTimestamp"] as? String) != nil { return "Terminating" }
+        if phase == "Succeeded" { return phase }
+        for container in (status?["initContainerStatuses"] as? [[String: Any]] ?? []).reversed() {
+            let state = container["state"] as? [String: Any]
+            if let waiting = state?["waiting"] as? [String: Any],
+               let reason = nonEmpty(waiting["reason"] as? String), reason != "PodInitializing" {
+                return "Init:\(reason)"
+            }
+            if let terminated = state?["terminated"] as? [String: Any],
+               let exitCode = terminated["exitCode"] as? Int, exitCode != 0 {
+                return "Init:\(nonEmpty(terminated["reason"] as? String) ?? "ExitCode:\(exitCode)")"
+            }
+        }
+        for container in (status?["containerStatuses"] as? [[String: Any]] ?? []).reversed() {
+            let state = container["state"] as? [String: Any]
+            if let waiting = state?["waiting"] as? [String: Any], let reason = nonEmpty(waiting["reason"] as? String) {
+                return reason
+            }
+        }
+        return nonEmpty(status?["reason"] as? String) ?? phase
+    }
+
     private func podSummaryFromJSONObject(
         _ item: [String: Any],
         defaultNamespace: String,
@@ -360,7 +389,7 @@ public struct KubernetesOutputParser {
         return PodSummary(
             name: name,
             namespace: namespace,
-            status: nonEmpty(status?["phase"] as? String) ?? "Unknown",
+            status: podDisplayStatus(metadata: metadata, status: status),
             totalRestarts: restartSum(from: containerStatuses)
                 + restartSum(from: initContainerStatuses)
                 + restartSum(from: ephemeralContainerStatuses),
@@ -868,6 +897,25 @@ public struct KubernetesOutputParser {
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
+    private static func nodePoolName(from labels: [String: String]) -> String? {
+        // Prefer current provider labels over legacy provisioner / eksctl labels.
+        let keys = [
+            "karpenter.sh/nodepool",
+            "eks.amazonaws.com/nodegroup",
+            "cloud.google.com/gke-nodepool",
+            "kubernetes.azure.com/agentpool",
+            "agentpool",
+            "karpenter.sh/provisioner-name",
+            "alpha.eksctl.io/nodegroup-name"
+        ]
+        for key in keys {
+            if let value = labels[key]?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty {
+                return value
+            }
+        }
+        return nil
+    }
+
     public func parseNodes(from raw: String) throws -> [ClusterResourceSummary] {
         let decoded = try JSONDecoder().decode(KubeList<KubeNodeItem>.self, from: Data(raw.utf8))
         return decoded.items
@@ -878,7 +926,8 @@ public struct KubernetesOutputParser {
                     name: item.metadata.name,
                     namespace: nil,
                     primaryText: ready,
-                    secondaryText: item.status.nodeInfo?.kubeletVersion ?? "Unknown version"
+                    secondaryText: item.status.nodeInfo?.kubeletVersion ?? "Unknown version",
+                    nodePoolName: Self.nodePoolName(from: item.metadata.labels ?? [:])
                 )
             }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
@@ -1075,6 +1124,7 @@ public struct KubernetesOutputParser {
     private struct KubeMetadata: Decodable {
         let name: String
         let namespace: String?
+        let labels: [String: String]?
         let uid: String?
         let ownerReferences: [KubeOwnerReference]?
     }

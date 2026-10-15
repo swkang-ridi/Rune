@@ -33,6 +33,7 @@ struct InspectorReadOnlyTextView: View {
     let text: String
     let resetID: String
     var resetScrollOnExternalChange = true
+    var followsEndOfText = false
     var contentStyle: AppKitManifestTextView.ContentStyle = .plainText
     var externalValidationIssues: [YAMLValidationIssue] = []
     var navigationRequest: YAMLTextNavigationRequest?
@@ -67,10 +68,13 @@ struct InspectorReadOnlyTextView: View {
                     RuneLargeTextSurface(
                         index: resolvedLargeTextIndex,
                         placeholder: "No output",
-                        scrollTargetLine: largeTextScrollTargetLine ?? searchTargetLine ?? navigationRequest?.line,
-                        scrollTargetRevision: largeTextScrollTargetRevision
-                            ?? (searchTargetLine == nil ? navigationRequest?.sequence : searchNavigationRevision),
+                        scrollTargetLine: followsEndOfText ? resolvedLargeTextIndex.lineCount
+                            : largeTextScrollTargetLine ?? searchTargetLine ?? navigationRequest?.line,
+                        scrollTargetRevision: followsEndOfText ? text.hashValue
+                            : largeTextScrollTargetRevision
+                                ?? (searchTargetLine == nil ? navigationRequest?.sequence : searchNavigationRevision),
                         scrollsOnTargetLineChange: largeTextScrollsOnTargetLineChange,
+                        startsAtEndOfText: followsEndOfText,
                         searchMatchRanges: resolvedSearchRanges ?? [],
                         selectedSearchMatchIndex: selectedSearchMatchIndex,
                         horizontalContentInset: RuneUILayoutMetrics.inspectorDocumentHorizontalInset,
@@ -85,9 +89,12 @@ struct InspectorReadOnlyTextView: View {
                     RuneLargeTextSurface(
                         text: text,
                         placeholder: "No output",
-                        scrollTargetLine: largeTextScrollTargetLine ?? navigationRequest?.line,
-                        scrollTargetRevision: largeTextScrollTargetRevision ?? navigationRequest?.sequence,
+                        scrollTargetLine: followsEndOfText ? RuneLargeTextIndex(text: text).lineCount
+                            : largeTextScrollTargetLine ?? navigationRequest?.line,
+                        scrollTargetRevision: followsEndOfText ? text.hashValue
+                            : largeTextScrollTargetRevision ?? navigationRequest?.sequence,
                         scrollsOnTargetLineChange: largeTextScrollsOnTargetLineChange,
+                        startsAtEndOfText: followsEndOfText,
                         searchMatchRanges: resolvedSearchRanges ?? [],
                         selectedSearchMatchIndex: selectedSearchMatchIndex,
                         horizontalContentInset: RuneUILayoutMetrics.inspectorDocumentHorizontalInset,
@@ -101,6 +108,7 @@ struct InspectorReadOnlyTextView: View {
                     text: .constant(text),
                     isEditable: false,
                     resetScrollOnExternalChange: resetScrollOnExternalChange,
+                    followsEndOfText: followsEndOfText,
                     contentStyle: contentStyle,
                     externalValidationIssues: externalValidationIssues,
                     navigationRequest: navigationRequest,

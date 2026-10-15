@@ -354,6 +354,14 @@ private struct RuneFakeK8sRouter {
         let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
 
         if method == "GET", query["watch"] == "1" {
+            if let bodies = fixture.watchResponseSequencesByPath[components.path], !bodies.isEmpty {
+                let attempt = requestRecorder.snapshot().filter { request in
+                    let target = request.requestLine.split(separator: " ", maxSplits: 2).dropFirst().first.map(String.init) ?? ""
+                    guard let url = URLComponents(string: "http://fake\(target)") else { return false }
+                    return url.path == components.path && url.queryItems?.contains { $0.name == "watch" && $0.value == "1" } == true
+                }.count
+                return RuneFakeK8sHTTPResponse(status: 200, contentType: "application/json", body: Data(bodies[min(max(0, attempt - 1), bodies.count - 1)].utf8))
+            }
             return .watch(events: [
                 [
                     "type": "MODIFIED",
@@ -456,6 +464,9 @@ private struct RuneFakeK8sRouter {
             }
 
             if pathParts == ["api", "v1", "nodes"] {
+                if isDenied(namespace: nil, verb: "list", resource: "nodes") {
+                    return .json(status: 403, object: status(message: "Forbidden: cannot list nodes."))
+                }
                 return .json(status: 200, object: listObject(
                     apiVersion: "v1",
                     kind: "NodeList",
@@ -501,7 +512,7 @@ private struct RuneFakeK8sRouter {
             if pathParts.count >= 5,
                Array(pathParts[0...2]) == ["api", "v1", "namespaces"],
                let namespace = cluster.namespaces.first(where: { $0.name == pathParts[3] }) {
-                return try routeCoreNamespaced(pathParts: pathParts, namespace: namespace, query: query)
+                return try routeCoreNamespaced(pathParts: pathParts, namespace: namespace, query: query, requestTarget: target)
             }
 
             if pathParts.count >= 6,
@@ -588,7 +599,8 @@ private struct RuneFakeK8sRouter {
     private func routeCoreNamespaced(
         pathParts: [String],
         namespace: RuneFakeK8sNamespace,
-        query: [String: String]
+        query: [String: String],
+        requestTarget: String
     ) throws -> RuneFakeK8sHTTPResponse {
         guard pathParts.count >= 5 else {
             return .json(status: 404, object: status(message: "Missing namespaced resource."))
@@ -632,6 +644,10 @@ private struct RuneFakeK8sRouter {
                     status: 400,
                     object: status(message: "container \(requestedContainer) is not valid for pod \(pod.name)")
                 )
+            }
+            if let responses = fixture.logResponseSequences[requestTarget], !responses.isEmpty {
+                let index = min(max(0, requestRecorder.count(target: requestTarget) - 1), responses.count - 1)
+                return .text(status: 200, body: responses[index])
             }
             return .text(status: 200, body: logLines(for: pod, namespace: namespace.name, container: requestedContainer))
         case "services" where pathParts.count == 5:
@@ -1373,6 +1389,7 @@ private struct RuneFakeK8sRouter {
             "kind": "Node",
             "metadata": [
                 "name": node.name,
+                "labels": node.labels,
                 "creationTimestamp": "2026-04-20T10:00:00Z"
             ],
             "status": [
@@ -1527,7 +1544,7 @@ private extension NWConnection {
             return
         }
 
-        let delay = DispatchTimeInterval.nanoseconds(min(Int(delayNanoseconds), Int(Int32.max)))
+        let delay = DispatchTimeInterval.nanoseconds(Int(clamping: delayNanoseconds))
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay) { [weak self] in
             self?.sendHTTPNow(response)
         }

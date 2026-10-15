@@ -174,9 +174,9 @@ enum RuneAppKitResourceListLayout {
     private static let podHeaderMinimums = (
         cpu: minimumHeaderColumnWidth(title: "CPU", reservesSortIndicator: true),
         memory: minimumHeaderColumnWidth(title: "MEM", reservesSortIndicator: true),
-        restarts: minimumHeaderColumnWidth(title: "Restarts", reservesSortIndicator: true),
-        age: minimumHeaderColumnWidth(title: "Age", reservesSortIndicator: true),
-        status: minimumHeaderColumnWidth(title: "Status", reservesSortIndicator: true)
+        restarts: minimumHeaderColumnWidth(title: "RESTARTS", reservesSortIndicator: true),
+        age: minimumHeaderColumnWidth(title: "AGE", reservesSortIndicator: true),
+        status: minimumHeaderColumnWidth(title: "STATUS", reservesSortIndicator: true)
     )
     private static let helmHeaderMinimums = (
         status: minimumHeaderColumnWidth(title: "Status", reservesSortIndicator: true),
@@ -258,6 +258,7 @@ enum RuneAppKitResourceListLayout {
         age: CGFloat,
         status: CGFloat,
         node: CGFloat,
+        nodePool: CGFloat,
         podIP: CGFloat,
         favorite: CGFloat
     ) {
@@ -291,8 +292,9 @@ enum RuneAppKitResourceListLayout {
                     maximum: PodTableLayout.nameColumnMaximumWidth,
                     growthWeight: 3
                 ),
-                ColumnRule(minimum: statusMinimum, ideal: max(statusMinimum, 118), maximum: 240, growthWeight: 1),
+                ColumnRule(minimum: statusMinimum, ideal: max(statusMinimum, 156), maximum: 260, growthWeight: 1.2),
                 ColumnRule(minimum: PodTableLayout.nodeWidth, ideal: 200, maximum: 400, growthWeight: 1.5),
+                ColumnRule(minimum: PodTableLayout.nodePoolWidth, ideal: 160, maximum: 360, growthWeight: 1.2),
                 ColumnRule(minimum: PodTableLayout.podIPWidth, ideal: 150, maximum: 360, growthWeight: 1),
                 ColumnRule(minimum: cpuMinimum, ideal: max(cpuMinimum, 78), maximum: 160, growthWeight: 0.7),
                 ColumnRule(minimum: memoryMinimum, ideal: max(memoryMinimum, 86), maximum: 180, growthWeight: 0.8),
@@ -304,14 +306,15 @@ enum RuneAppKitResourceListLayout {
         return (
             selection: widths[0],
             name: widths[1],
-            cpu: widths[5],
-            memory: widths[6],
-            restarts: widths[7],
-            age: widths[8],
+            cpu: widths[6],
+            memory: widths[7],
+            restarts: widths[8],
+            age: widths[9],
             status: widths[2],
             node: widths[3],
-            podIP: widths[4],
-            favorite: widths[9]
+            nodePool: widths[4],
+            podIP: widths[5],
+            favorite: widths[10]
         )
     }
 
@@ -990,6 +993,9 @@ enum RuneAppKitResourceTableRefreshPlan: Equatable {
                 forRowIndexes: rows,
                 columnIndexes: IndexSet(integersIn: 0..<tableView.numberOfColumns)
             )
+            for row in rows {
+                tableView.rowView(atRow: row, makeIfNecessary: false)?.needsDisplay = true
+            }
         case .reloadAll:
             tableView.reloadData()
         }
@@ -998,8 +1004,8 @@ enum RuneAppKitResourceTableRefreshPlan: Equatable {
 
 @MainActor
 enum RuneAppKitResourceTableStyle {
-    static let headerHeight: CGFloat = 24
-    static let rowHeight: CGFloat = 34
+    static let headerHeight: CGFloat = 28
+    static let rowHeight: CGFloat = 16
     static let rowGap: CGFloat = 0
     static let rowHorizontalInset: CGFloat = 0
     static let actionColumnTrailingPadding = RuneAppKitResourceListLayout.viewportTrailingPadding
@@ -1011,7 +1017,8 @@ enum RuneAppKitResourceTableStyle {
         tableView.usesAlternatingRowBackgroundColors = false
         tableView.backgroundColor = .clear
         tableView.gridStyleMask = []
-        tableView.rowSizeStyle = .medium
+        // System presets can override rowHeight when the table enters a window.
+        tableView.rowSizeStyle = .custom
         tableView.rowHeight = rowHeight
         tableView.intercellSpacing = NSSize(width: 0, height: rowGap)
         tableView.allowsMultipleSelection = false
@@ -1527,9 +1534,8 @@ func resolvedRuneResourceTableTheme(for view: NSView) -> RuneResolvedTheme {
     return RuneAppearanceTheme.native.resolvedTheme
 }
 
-/// All resource families share these cells; resolve their ink against both row states.
 @MainActor
-func runeResourceCellColor(_ requested: NSColor, theme: RuneResolvedTheme, tintOpacity: Double = 0) -> NSColor {
+private func runeResourceRequestedColor(_ requested: NSColor, theme: RuneResolvedTheme) -> NSColor {
     let palette = theme.palette
     let color: NSColor
     if requested == .labelColor { color = palette.map { NSColor($0.foreground) } ?? requested }
@@ -1538,11 +1544,41 @@ func runeResourceCellColor(_ requested: NSColor, theme: RuneResolvedTheme, tintO
     else if requested == .systemOrange || requested == .systemYellow { color = palette.map { NSColor($0.warning) } ?? requested }
     else if requested == .systemRed { color = palette.map { NSColor($0.danger) } ?? requested }
     else if requested == .systemBlue { color = palette.map { NSColor($0.info) } ?? requested }
+    else if requested == .systemCyan { color = palette.map { NSColor($0.accent) } ?? requested }
     else { color = requested }
-    let row = RuneThemeContrast.RGB(palette.map { NSColor($0.row) } ?? .controlBackgroundColor)
-    let accent = RuneThemeContrast.RGB(palette.map { NSColor($0.accentFill) } ?? .controlAccentColor)
-    let selected = accent.over(row, opacity: Double(theme.appKitPalette?.selectedAlpha ?? 0.11))
-    let backgrounds = [row, selected].map { RuneThemeContrast.RGB(requested).over($0, opacity: tintOpacity).nsColor }
+    return color
+}
+
+@MainActor
+private func runeResourceRowBackgrounds(theme: RuneResolvedTheme) -> [NSColor] {
+    let tableTheme = RuneAppKitResourceTableTheme.resolved(theme)
+    return [tableTheme.rowFill, tableTheme.selectedRowFill]
+}
+
+@MainActor
+private func runePodRowTone(for view: NSView?) -> RunePodStatusTone? {
+    var candidate = view
+    while let current = candidate {
+        if let table = current as? RuneAppKitResourceTableView,
+           let view, let status = table.podStatusForRow?(table.row(for: view)) {
+            return RunePodStatusTone(status: status)
+        }
+        candidate = current.superview
+    }
+    return nil
+}
+
+/// All resource families share these cells; resolve ink against selected and unselected row fills.
+@MainActor
+func runeResourceCellColor(_ requested: NSColor, theme: RuneResolvedTheme, tintOpacity: Double = 0, in view: NSView? = nil) -> NSColor {
+    let tone = runePodRowTone(for: view)
+    let rowInk = requested == .labelColor || requested == .secondaryLabelColor || requested == .systemBlue
+        ? tone?.nativeColor ?? requested
+        : requested
+    let color = runeResourceRequestedColor(rowInk, theme: theme)
+    let backgrounds = runeResourceRowBackgrounds(theme: theme).map {
+        RuneThemeContrast.RGB(requested).over(RuneThemeContrast.RGB($0), opacity: tintOpacity).nsColor
+    }
     return RuneThemeContrast.readable(color, over: backgrounds)
 }
 
@@ -1567,6 +1603,9 @@ struct AppKitPodTableView: NSViewRepresentable {
     let onOpenDescribe: (PodSummary) -> Void
     let onOpenYAML: (PodSummary) -> Void
     let onDelete: (PodSummary) -> Void
+    var onOpenNode: ((PodSummary) -> Void)? = nil
+    var onActivatePod: ((PodSummary) -> Void)? = nil
+    var nodePoolNamesByNode: [String: String] = [:]
     @Environment(\.runeResolvedTheme) private var resolvedTheme
     @AppStorage(RuneSettingsKeys.showResourceTableScrollEdgeGlow) private var showsHorizontalOverflowEdgeGlow = true
 
@@ -1594,6 +1633,11 @@ struct AppKitPodTableView: NSViewRepresentable {
         )
         guard let tableView = RuneAppKitResourceTableHost.tableView(in: scrollView) else { return scrollView }
         context.coordinator.tableView = tableView
+        (tableView as? RuneAppKitResourceTableView)?.podStatusForRow = { [weak coordinator = context.coordinator] row in
+            coordinator?.podStatus(at: row)
+        }
+        tableView.target = context.coordinator
+        tableView.action = #selector(Coordinator.activateClickedPod(_:))
         context.coordinator.apply(parent: self)
         RuneAppKitResourceTableHost.invalidateTheme(in: scrollView, resolvedTheme: resolvedTheme)
         RuneAppKitResourceTableHost.configureHorizontalOverflowEdgeGlow(
@@ -1631,6 +1675,7 @@ struct AppKitPodTableView: NSViewRepresentable {
         private var nameColumnPersistWorkItem: DispatchWorkItem?
         private var applyGeneration = 0
         private var displayedRows: [RuneAppKitResourceTableRowSnapshot<PodSummary>]?
+        private var displayedNodePoolNames: [String: String] = [:]
         private var hasAppliedDisplayedRows = false
         private let tableID = "pods"
 
@@ -1671,11 +1716,21 @@ struct AppKitPodTableView: NSViewRepresentable {
                     previous: self.hasAppliedDisplayedRows ? self.displayedRows : nil,
                     current: rows
                 )
+                let poolRows = IndexSet(rows.indices.filter { row in
+                    let nodeName = rows[row].value.nodeName ?? ""
+                    return self.hasAppliedDisplayedRows
+                        && self.displayedNodePoolNames[nodeName] != self.parent.nodePoolNamesByNode[nodeName]
+                })
                 self.displayedRows = rows
+                self.displayedNodePoolNames = self.parent.nodePoolNamesByNode
                 self.hasAppliedDisplayedRows = true
                 self.updateColumnWidths(on: tableView)
                 self.isApplyingSelection = true
                 refreshPlan.apply(to: tableView)
+                if !poolRows.isEmpty,
+                   let columnIndex = tableView.tableColumns.firstIndex(where: { $0.identifier.rawValue == PodColumn.nodePool.rawValue }) {
+                    tableView.reloadData(forRowIndexes: poolRows, columnIndexes: IndexSet(integer: columnIndex))
+                }
                 self.applySelection(on: tableView, rows: rows, generation: generation)
                 self.isApplyingSelection = false
                 self.updateSortIndicator(on: tableView)
@@ -1684,6 +1739,10 @@ struct AppKitPodTableView: NSViewRepresentable {
 
         func numberOfRows(in tableView: NSTableView) -> Int {
             displayedRows?.count ?? 0
+        }
+
+        func podStatus(at row: Int) -> String? {
+            displayedResourceTableRow(at: row, in: displayedRows)?.value.status
         }
 
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
@@ -1709,20 +1768,43 @@ struct AppKitPodTableView: NSViewRepresentable {
                     in: tableView,
                     column: tableColumn,
                     text: pod.name,
-                    font: .systemFont(ofSize: NSFont.systemFontSize, weight: .medium),
+                    font: metricsFont,
                     alignment: .left,
                     tooltip: pod.name,
                     lineBreakMode: .byTruncatingMiddle
                 )
 
             case .node:
+                let nodeName = pod.nodeName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let hasNode = !nodeName.isEmpty
+                return dequeueResourceTableCell(
+                    resourceTableCellIdentifier(for: tableColumn),
+                    from: tableView,
+                    make: { RuneAppKitResourceLinkCell(frame: .zero) }
+                ) { cell in
+                    cell.configure(
+                        text: hasNode ? nodeName : "—",
+                        accessibilityLabel: hasNode ? "Open node \(nodeName)" : "Node not assigned",
+                        help: hasNode ? "Show details for node \(nodeName)" : "Pod is not assigned to a node.",
+                        onOpen: hasNode && parent.onOpenNode != nil ? { [weak self] in
+                            guard let self,
+                                  let currentPod = self.parent.pods.first(where: { $0.id == pod.id }),
+                                  currentPod.nodeName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                            else { return }
+                            self.parent.onOpenNode?(currentPod)
+                        } : nil
+                    )
+                }
+
+            case .nodePool:
+                let pool = displayedNodePoolNames[pod.nodeName ?? ""]
                 return resourceTableLabelCell(
                     in: tableView,
                     column: tableColumn,
-                    text: pod.nodeName ?? "—",
-                    font: .systemFont(ofSize: NSFont.smallSystemFontSize),
+                    text: pool ?? "—",
+                    font: metricsFont,
                     alignment: .left,
-                    tooltip: pod.nodeName,
+                    tooltip: pool,
                     lineBreakMode: .byTruncatingMiddle
                 )
 
@@ -1774,12 +1856,15 @@ struct AppKitPodTableView: NSViewRepresentable {
                 )
 
             case .status:
-                return resourceTablePillCell(
+                return resourceTableLabelCell(
                     in: tableView,
                     column: tableColumn,
                     text: pod.status,
-                    color: statusColor(for: pod.status),
-                    tooltip: "\(pod.status) - pod status from the cluster"
+                    font: metricsFont,
+                    alignment: .left,
+                    textColor: statusColor(for: pod.status),
+                    tooltip: "\(pod.status) - pod status from the cluster",
+                    lineBreakMode: .byTruncatingMiddle
                 )
 
             case .favorite:
@@ -1854,6 +1939,20 @@ struct AppKitPodTableView: NSViewRepresentable {
             tableViewSelectionDidChange(
                 Notification(name: NSTableView.selectionDidChangeNotification, object: tableView)
             )
+        }
+
+        @objc func activateClickedPod(_ tableView: NSTableView) {
+            guard tableView.clickedColumn >= 0,
+                  tableView.clickedColumn < tableView.tableColumns.count,
+                  let column = PodColumn(rawValue: tableView.tableColumns[tableView.clickedColumn].identifier.rawValue),
+                  column != .selection, column != .favorite, column != .node else { return }
+            activatePod(at: tableView.clickedRow)
+        }
+
+        func activatePod(at row: Int) {
+            guard let snapshot = displayedResourceTableRow(at: row, in: displayedRows),
+                  let pod = parent.pods.first(where: { $0.id == snapshot.id }) else { return }
+            parent.onActivatePod?(pod)
         }
 
         func tableView(_ tableView: NSTableView, didClick tableColumn: NSTableColumn) {
@@ -2086,6 +2185,7 @@ struct AppKitPodTableView: NSViewRepresentable {
                 .age: widths.age,
                 .status: widths.status,
                 .node: widths.node,
+                .nodePool: widths.nodePool,
                 .podIP: widths.podIP,
                 .favorite: widths.favorite
             ]
@@ -2101,6 +2201,15 @@ struct AppKitPodTableView: NSViewRepresentable {
                     column.maximumWidth
                 )
             }
+            let statusTextWidth = Set(parent.pods.map(\.status)).map { status in
+                (status as NSString).size(withAttributes: [.font: metricsFont]).width
+            }.max() ?? 0
+            let statusContentWidth = min(
+                PodColumn.status.maximumWidth,
+                ceil(statusTextWidth) + RuneAppKitResourceTableStyle.contentLeadingInset
+                    + RuneAppKitResourceTableStyle.contentTrailingInset
+            )
+            projected[.status] = max(projected[.status] ?? widths.status, statusContentWidth)
             let occupiedWidth = projected.reduce(CGFloat(0)) { partialResult, element in
                 element.key == .name ? partialResult : partialResult + element.value
             }
@@ -2173,7 +2282,7 @@ struct AppKitPodTableView: NSViewRepresentable {
         }
 
         private var metricsFont: NSFont {
-            .monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+            RunePodTableStyle.font
         }
 
         @objc private func toggleFavoriteButton(_ sender: NSButton) {
@@ -2182,16 +2291,7 @@ struct AppKitPodTableView: NSViewRepresentable {
         }
 
         private func statusColor(for status: String) -> NSColor {
-            switch status.lowercased() {
-            case "running", "succeeded", "ready":
-                return .systemGreen
-            case "pending", "terminating":
-                return .systemOrange
-            case "failed", "error", "crashloopbackoff":
-                return .systemRed
-            default:
-                return .secondaryLabelColor
-            }
+            RunePodStatusTone(status: status).nativeColor
         }
 
         private func menuItem(_ title: String, action: Selector, pod: PodSummary, isEnabled: Bool = true) -> NSMenuItem {
@@ -5193,6 +5293,7 @@ struct AppKitOperatorResourceListView: NSViewRepresentable {
 
 @MainActor
 final class RuneAppKitResourceTableView: NSTableView {
+    var podStatusForRow: ((Int) -> String?)?
     var resolvedTheme = RuneAppearanceTheme.native.resolvedTheme {
         didSet {
             guard resolvedTheme.resourceTableRenderSignature
@@ -5588,6 +5689,11 @@ final class RuneAppKitResourceTableRowView: NSTableRowView {
 
     override func drawSelection(in dirtyRect: NSRect) {}
 
+    var resolvedBackgroundColor: NSColor {
+        let colors = runeResourceRowBackgrounds(theme: resolvedRuneResourceTableTheme(for: self))
+        return colors[isSelected ? 1 : 0]
+    }
+
     override func drawBackground(in dirtyRect: NSRect) {
         let contentWidth = (superview as? NSTableView)
             .map(RuneAppKitResourceTableStyle.renderedTableWidth(in:)) ?? bounds.width
@@ -5598,13 +5704,18 @@ final class RuneAppKitResourceTableRowView: NSTableRowView {
             height: bounds.height
         )
         let tableTheme = RuneAppKitResourceTableTheme.resolved(for: self)
-        let fill = isSelected
-            ? tableTheme.selectedRowFill
-            : tableTheme.rowFill
-        fill.setFill()
+        resolvedBackgroundColor.setFill()
         rowRect.fill()
 
-        if !isSelected {
+        if isSelected, runePodRowTone(for: self) != nil {
+            let theme = resolvedRuneResourceTableTheme(for: self)
+            (theme.palette.map { NSColor($0.accentFill) } ?? .controlAccentColor).withAlphaComponent(0.85).setStroke()
+            let outline = NSBezierPath(rect: rowRect.insetBy(dx: 0.75, dy: 0.75))
+            outline.lineWidth = 1.5
+            outline.stroke()
+        }
+
+        if !isSelected, runePodRowTone(for: self) == nil {
             tableTheme.rowStroke.setFill()
             NSRect(
                 x: rowRect.minX,
@@ -5866,7 +5977,7 @@ private final class RuneAppKitCenteredLabelCell: NSView {
 
     private func refreshTextColor() {
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            label.textColor = runeResourceCellColor(requestedTextColor, theme: resolvedRuneResourceTableTheme(for: self))
+            label.textColor = runeResourceCellColor(requestedTextColor, theme: resolvedRuneResourceTableTheme(for: self), in: self)
         }
     }
 
@@ -5892,6 +6003,95 @@ private final class RuneAppKitCenteredLabelCell: NSView {
             ? -RuneAppKitResourceTableStyle.contentTrailingInset
             : 0
     }
+}
+
+private final class RuneAppKitResourceLinkCell: NSView {
+    private let button = NSButton()
+    private let placeholderLabel = NSTextField(labelWithString: "")
+    private var onOpen: (() -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        button.isBordered = false
+        button.setButtonType(.momentaryPushIn)
+        button.controlSize = .small
+        button.alignment = .left
+        button.cell?.lineBreakMode = .byTruncatingMiddle
+        button.cell?.usesSingleLineMode = true
+        button.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        button.target = self
+        button.action = #selector(openResource)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(button)
+        NSLayoutConstraint.activate([
+            button.leadingAnchor.constraint(equalTo: leadingAnchor, constant: RuneAppKitResourceTableStyle.contentLeadingInset),
+            button.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -RuneAppKitResourceTableStyle.contentTrailingInset),
+            button.topAnchor.constraint(equalTo: topAnchor),
+            button.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+        placeholderLabel.font = RunePodTableStyle.font
+        placeholderLabel.maximumNumberOfLines = 1
+        placeholderLabel.lineBreakMode = .byTruncatingMiddle
+        placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(placeholderLabel)
+        NSLayoutConstraint.activate([
+            placeholderLabel.leadingAnchor.constraint(equalTo: button.leadingAnchor),
+            placeholderLabel.trailingAnchor.constraint(equalTo: button.trailingAnchor),
+            placeholderLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    func configure(text: String, accessibilityLabel: String, help: String, onOpen: (() -> Void)?) {
+        self.onOpen = onOpen
+        button.title = text
+        button.isEnabled = onOpen != nil
+        // Disabled NSButtons substitute system ink, which can be unreadable on a custom theme.
+        button.isHidden = onOpen == nil
+        placeholderLabel.isHidden = onOpen != nil
+        placeholderLabel.stringValue = text
+        placeholderLabel.toolTip = help
+        placeholderLabel.setAccessibilityLabel(accessibilityLabel)
+        button.toolTip = help
+        button.setAccessibilityLabel(accessibilityLabel)
+        button.setAccessibilityHelp(help)
+        refreshTextColor()
+        window?.invalidateCursorRects(for: self)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        refreshTextColor()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        refreshTextColor()
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        if onOpen != nil { addCursorRect(bounds, cursor: .pointingHand) }
+    }
+
+    private func refreshTextColor() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            let color = runeResourceCellColor(
+                onOpen == nil ? .secondaryLabelColor : .systemBlue,
+                theme: resolvedRuneResourceTableTheme(for: self),
+                in: self
+            )
+            button.attributedTitle = NSAttributedString(string: button.title, attributes: [
+                .font: RunePodTableStyle.font,
+                .foregroundColor: color,
+                .underlineStyle: 0
+            ])
+            placeholderLabel.textColor = color
+        }
+    }
+
+    @objc private func openResource() { onOpen?() }
 }
 
 private final class RuneAppKitPillCell: NSView {
@@ -5968,7 +6168,7 @@ private final class RuneAppKitFavoriteButtonCell: NSView {
 
     private func refreshTint() {
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            button.contentTintColor = runeResourceCellColor(requestedTint, theme: resolvedRuneResourceTableTheme(for: self))
+            button.contentTintColor = runeResourceCellColor(requestedTint, theme: resolvedRuneResourceTableTheme(for: self), in: self)
         }
     }
 
@@ -5982,7 +6182,7 @@ private final class RuneAppKitFavoriteButtonCell: NSView {
             button.centerXAnchor.constraint(equalTo: centerXAnchor),
             button.centerYAnchor.constraint(equalTo: centerYAnchor),
             button.widthAnchor.constraint(equalToConstant: RuneUILayoutMetrics.iconButtonSize),
-            button.heightAnchor.constraint(equalToConstant: RuneUILayoutMetrics.iconButtonSize)
+            button.heightAnchor.constraint(equalToConstant: min(RuneUILayoutMetrics.iconButtonSize, RuneAppKitResourceTableStyle.rowHeight))
         ])
     }
 }
@@ -6020,7 +6220,7 @@ private final class RuneAppKitCheckboxCell: NSView {
     private func configureCheckboxLayout() {
         checkbox.setButtonType(.switch)
         checkbox.title = ""
-        checkbox.controlSize = .small
+        checkbox.controlSize = .mini
         checkbox.translatesAutoresizingMaskIntoConstraints = false
         addSubview(checkbox)
         NSLayoutConstraint.activate([
@@ -6054,8 +6254,8 @@ private final class RuneAppKitResourceStatusPillView: NSView {
         NSLayoutConstraint.activate([
             label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
             label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            label.topAnchor.constraint(equalTo: topAnchor, constant: 2),
-            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2),
+            label.topAnchor.constraint(equalTo: topAnchor, constant: 1),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -1),
             widthAnchor.constraint(greaterThanOrEqualToConstant: minimumWidth)
         ])
     }
@@ -6064,7 +6264,7 @@ private final class RuneAppKitResourceStatusPillView: NSView {
         label.stringValue = text
         self.color = color
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            label.textColor = runeResourceCellColor(color, theme: resolvedRuneResourceTableTheme(for: self), tintOpacity: 0.12)
+            label.textColor = runeResourceCellColor(color, theme: resolvedRuneResourceTableTheme(for: self), tintOpacity: 0.12, in: self)
             layer?.backgroundColor = color.withAlphaComponent(0.12).cgColor
         }
     }
@@ -6728,6 +6928,7 @@ private enum PodColumn: String, CaseIterable {
     case name
     case status
     case node
+    case nodePool
     case podIP
     case cpu
     case memory
@@ -6754,7 +6955,7 @@ private enum PodColumn: String, CaseIterable {
         case .restarts: return .restarts
         case .age: return .age
         case .status: return .status
-        case .selection, .favorite, .node, .podIP: return nil
+        case .selection, .favorite, .node, .nodePool, .podIP: return nil
         }
     }
 
@@ -6778,14 +6979,15 @@ private enum PodColumn: String, CaseIterable {
     var title: String {
         switch self {
         case .selection: return ""
-        case .name: return "Name"
-        case .node: return "Node"
-        case .podIP: return "Pod IP"
+        case .name: return "NAME"
+        case .node: return "NODE"
+        case .nodePool: return "NODE POOL"
+        case .podIP: return "POD IP"
         case .cpu: return "CPU"
         case .memory: return "MEM"
-        case .restarts: return "Restarts"
-        case .age: return "Age"
-        case .status: return "Status"
+        case .restarts: return "RESTARTS"
+        case .age: return "AGE"
+        case .status: return "STATUS"
         case .favorite: return ""
         }
     }
@@ -6794,9 +6996,7 @@ private enum PodColumn: String, CaseIterable {
         switch self {
         case .cpu, .memory, .restarts, .age:
             return .right
-        case .status:
-            return .center
-        case .selection, .favorite, .name, .node, .podIP:
+        case .selection, .favorite, .name, .status, .node, .nodePool, .podIP:
             return .left
         }
     }
@@ -6806,6 +7006,7 @@ private enum PodColumn: String, CaseIterable {
         case .selection: return PodTableLayout.selectionColumnWidth
         case .name: return PodTableLayout.clampedNameColumnWidth(nameColumnWidth)
         case .node: return PodTableLayout.nodeWidth
+        case .nodePool: return PodTableLayout.nodePoolWidth
         case .podIP: return PodTableLayout.podIPWidth
         case .cpu: return PodTableLayout.cpuWidth
         case .memory: return PodTableLayout.memoryWidth
@@ -6828,7 +7029,7 @@ private enum PodColumn: String, CaseIterable {
                 width(nameColumnWidth: PodTableLayout.nameColumnDefaultWidth),
                 RuneAppKitResourceListLayout.minimumHeaderColumnWidth(title: title, reservesSortIndicator: true)
             )
-        case .node, .podIP:
+        case .node, .nodePool, .podIP:
             return max(
                 width(nameColumnWidth: PodTableLayout.nameColumnDefaultWidth),
                 RuneAppKitResourceListLayout.minimumHeaderColumnWidth(title: title, reservesSortIndicator: false)
@@ -6845,8 +7046,9 @@ private enum PodColumn: String, CaseIterable {
         case .memory: return 180
         case .restarts: return 180
         case .age: return 140
-        case .status: return 240
+        case .status: return 260
         case .node: return 600
+        case .nodePool: return 420
         case .podIP: return 420
         case .selection, .favorite:
             return width(nameColumnWidth: PodTableLayout.nameColumnDefaultWidth)
@@ -6856,7 +7058,7 @@ private enum PodColumn: String, CaseIterable {
     var isUserResizable: Bool {
         switch self {
         case .selection, .favorite: return false
-        case .name, .cpu, .memory, .restarts, .age, .status, .node, .podIP: return true
+        case .name, .cpu, .memory, .restarts, .age, .status, .node, .nodePool, .podIP: return true
         }
     }
 }

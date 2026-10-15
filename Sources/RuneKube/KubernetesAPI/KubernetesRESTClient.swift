@@ -295,8 +295,7 @@ final class KubernetesRESTClient: @unchecked Sendable {
             URLQueryItem(name: "timeoutSeconds", value: String(min(max(timeoutSeconds, 30), 600)))
         ] + (resourceVersion.map {
             [
-                URLQueryItem(name: "resourceVersion", value: $0),
-                URLQueryItem(name: "resourceVersionMatch", value: "NotOlderThan")
+                URLQueryItem(name: "resourceVersion", value: $0)
             ]
         } ?? [])
         let apiPath = components.percentEncodedPath
@@ -329,8 +328,8 @@ final class KubernetesRESTClient: @unchecked Sendable {
                     guard let httpResponse = response as? HTTPURLResponse,
                           (200..<300).contains(httpResponse.statusCode) else {
                         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-                        throw RuneError.commandFailed(
-                            command: "kubernetes REST watch",
+                        throw KubernetesResourceWatchError(
+                            statusCode: status,
                             message: "Kubernetes watch failed with HTTP status \(status)."
                         )
                     }
@@ -339,8 +338,8 @@ final class KubernetesRESTClient: @unchecked Sendable {
                         guard !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
                         let event = try KubernetesResourceWatchEvent.decode(line: line)
                         if event.type == .error {
-                            throw RuneError.commandFailed(
-                                command: "kubernetes REST watch",
+                            throw KubernetesResourceWatchError(
+                                statusCode: event.errorStatusCode ?? 0,
                                 message: event.errorMessage ?? "Kubernetes watch reported an error."
                             )
                         }

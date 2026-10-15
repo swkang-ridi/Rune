@@ -4,6 +4,23 @@ import XCTest
 @testable import RuneKube
 
 final class KubernetesClientTests: XCTestCase {
+    func testPodWatchEventKeepsTheObjectNeededForImmediateRowUpdates() throws {
+        let event = try KubernetesResourceWatchEvent.decode(line: #"""
+        {"type":"MODIFIED","object":{"kind":"Pod","metadata":{"name":"api","namespace":"payments","resourceVersion":"45","labels":{"app":"api"}},"spec":{"nodeName":"node-b","containers":[{"name":"api","image":"api:v2"}]},"status":{"phase":"Running","podIP":"10.42.0.9","containerStatuses":[{"name":"api","ready":false,"restartCount":4,"state":{"waiting":{"reason":"CrashLoopBackOff"}}}]}}}
+        """#)
+        XCTAssertEqual(event.resourceName, "api")
+        XCTAssertEqual(event.resourceNamespace, "payments")
+        XCTAssertEqual(event.pod?.status, "CrashLoopBackOff")
+        XCTAssertEqual(event.pod?.nodeName, "node-b")
+        XCTAssertEqual(event.pod?.podIP, "10.42.0.9")
+        XCTAssertEqual(event.pod?.totalRestarts, 4)
+        XCTAssertEqual(event.pod?.containersReady, "0/1")
+        XCTAssertEqual(event.pod?.labels["app"], "api")
+        let expired = try KubernetesResourceWatchEvent.decode(line: #"{"type":"ERROR","object":{"code":410,"message":"expired"}}"#)
+        XCTAssertEqual(expired.errorStatusCode, 410)
+        XCTAssertNil(expired.pod)
+    }
+
     func testKubernetesWatchEventDecodesChangesBookmarksAndErrors() throws {
         XCTAssertEqual(
             try KubernetesResourceWatchEvent.decode(

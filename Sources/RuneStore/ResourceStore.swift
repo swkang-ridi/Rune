@@ -111,6 +111,15 @@ public final class ResourceStore {
         return snapshotsByContextAndNamespace[cacheKey] ?? .empty
     }
 
+    public func cachePods(_ pods: [PodSummary], context: KubeContext, namespace: String) {
+        let cacheKey = key(context: context, namespace: namespace)
+        var snapshot = snapshotsByContextAndNamespace[cacheKey] ?? .empty
+        snapshot.pods = pods
+        snapshotsByContextAndNamespace[cacheKey] = snapshot
+        touchSnapshotKey(cacheKey, contextName: context.name)
+        pruneSnapshotsIfNeeded(contextName: context.name)
+    }
+
     public func cacheNamespaces(_ namespaces: [String], context: KubeContext) {
         namespacesByContext[contextKey(context)] = namespaces
     }

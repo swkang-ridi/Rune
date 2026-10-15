@@ -1296,7 +1296,7 @@ final class ResourceLogsInspectorViewTests: XCTestCase {
         XCTAssertTrue(source.contains("showsInsights: !simpleMode"))
         XCTAssertTrue(source.contains(".onChange(of: simpleMode)"))
         XCTAssertTrue(source.contains("scheduleStructuredSummary(for: logText, debounced: false)"))
-        XCTAssertTrue(source.contains("guard !simpleMode else"))
+        XCTAssertTrue(source.contains("guard showsControls, !simpleMode else"))
         XCTAssertTrue(source.contains("structuredLogSummary = ResourceStructuredLogAnalyzer.analyze(text: \"\")"))
     }
 
@@ -1639,7 +1639,7 @@ final class ResourceLogsInspectorViewTests: XCTestCase {
     }
 
     @MainActor
-    func testWideFewLinePodLogsFillInspectorOutputHeight() async throws {
+    func testWideFewLinePodLogsFillMinimalLogWindowOutputHeight() async throws {
         let longPayload = String(repeating: " payload=synthetic-wide-log-field", count: 140)
         let text = (0..<80)
             .map { index in "line-\(String(format: "%06d", index))\(longPayload)" }
@@ -1660,6 +1660,7 @@ final class ResourceLogsInspectorViewTests: XCTestCase {
                 isLoadingResources: false,
                 errorMessage: nil,
                 statusText: "Tail off",
+                showsControls: false,
                 containerOptions: ["app"],
                 logText: text,
                 readOnlyResetID: "large-few-line-log-layout",
@@ -1695,8 +1696,8 @@ final class ResourceLogsInspectorViewTests: XCTestCase {
 
         XCTAssertGreaterThanOrEqual(
             outputScrollView.frame.height,
-            360,
-            "Large few-line logs must use the remaining inspector height; otherwise only a few lines render and the rest of the panel looks blank."
+            600,
+            "The minimal log window must give large few-line logs the full output height."
         )
     }
 

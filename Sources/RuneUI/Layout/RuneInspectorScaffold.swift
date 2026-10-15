@@ -28,14 +28,16 @@ struct RuneInspectorScaffoldLayoutSnapshot: Equatable, Sendable {
     }
 }
 
-/// Stable inspector hierarchy: identity and primary utilities, compact core info,
-/// tabs, optional actions, then either a vertically scrolling or self-managed body.
+/// Shared inspector regions, with optional top tabs and identity information,
+/// followed by actions and a vertically scrolling or self-managed body.
 struct RuneInspectorScaffold<Info: View, Tabs: View, Actions: View, Body: View>: View {
     let title: String
     let copyAccessibilityLabel: String
     let bodyScrollBehavior: RuneInspectorBodyScrollBehavior
     let showsTabs: Bool
     let showsActions: Bool
+    let tabsAtTop: Bool
+    let showsIdentityAndInfo: Bool
     let onCopy: () -> Void
     let onRefresh: () -> Void
     let onLayoutSnapshotChange: ((RuneInspectorScaffoldLayoutSnapshot) -> Void)?
@@ -50,6 +52,8 @@ struct RuneInspectorScaffold<Info: View, Tabs: View, Actions: View, Body: View>:
         bodyScrollBehavior: RuneInspectorBodyScrollBehavior,
         showsTabs: Bool = true,
         showsActions: Bool = true,
+        tabsAtTop: Bool = false,
+        showsIdentityAndInfo: Bool = true,
         onCopy: @escaping () -> Void,
         onRefresh: @escaping () -> Void,
         onLayoutSnapshotChange: ((RuneInspectorScaffoldLayoutSnapshot) -> Void)? = nil,
@@ -63,6 +67,8 @@ struct RuneInspectorScaffold<Info: View, Tabs: View, Actions: View, Body: View>:
         self.bodyScrollBehavior = bodyScrollBehavior
         self.showsTabs = showsTabs
         self.showsActions = showsActions
+        self.tabsAtTop = tabsAtTop
+        self.showsIdentityAndInfo = showsIdentityAndInfo
         self.onCopy = onCopy
         self.onRefresh = onRefresh
         self.onLayoutSnapshotChange = onLayoutSnapshotChange
@@ -74,20 +80,23 @@ struct RuneInspectorScaffold<Info: View, Tabs: View, Actions: View, Body: View>:
 
     var body: some View {
         VStack(alignment: .leading, spacing: RuneInspectorScaffoldMetrics.sectionSpacing) {
-            identityHeader
-                .accessibilityIdentifier("rune.inspector.identity")
-                .runeInspectorScaffoldLayoutProbe(.identity, enabled: onLayoutSnapshotChange != nil)
+            if showsTabs && tabsAtTop {
+                tabRegion
+            }
 
-            info
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityIdentifier("rune.inspector.info")
-                .runeInspectorScaffoldLayoutProbe(.info, enabled: onLayoutSnapshotChange != nil)
+            if showsIdentityAndInfo {
+                identityHeader
+                    .accessibilityIdentifier("rune.inspector.identity")
+                    .runeInspectorScaffoldLayoutProbe(.identity, enabled: onLayoutSnapshotChange != nil)
 
-            if showsTabs {
-                tabs
+                info
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityIdentifier("rune.inspector.tabs")
-                    .runeInspectorScaffoldLayoutProbe(.tabs, enabled: onLayoutSnapshotChange != nil)
+                    .accessibilityIdentifier("rune.inspector.info")
+                    .runeInspectorScaffoldLayoutProbe(.info, enabled: onLayoutSnapshotChange != nil)
+            }
+
+            if showsTabs && !tabsAtTop {
+                tabRegion
             }
 
             if showsActions {
@@ -110,6 +119,13 @@ struct RuneInspectorScaffold<Info: View, Tabs: View, Actions: View, Body: View>:
         )
         .runeInspectorScaffoldLayoutReporting(onLayoutSnapshotChange)
         .accessibilityElement(children: .contain)
+    }
+
+    private var tabRegion: some View {
+        tabs
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("rune.inspector.tabs")
+            .runeInspectorScaffoldLayoutProbe(.tabs, enabled: onLayoutSnapshotChange != nil)
     }
 
     private var identityHeader: some View {

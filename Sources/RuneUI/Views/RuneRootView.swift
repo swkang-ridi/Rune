@@ -882,6 +882,7 @@ enum PodTableLayout {
     static let statusHorizontalPadding: CGFloat = 8
     static let statusTotalWidth: CGFloat = statusTextWidth + (statusHorizontalPadding * 2)
     static let nodeWidth: CGFloat = 160
+    static let nodePoolWidth: CGFloat = 128
     static let podIPWidth: CGFloat = 136
     static let headerHorizontalInset: CGFloat = rowHorizontalPadding
     static let selectionColumnWidth: CGFloat = 30
@@ -904,6 +905,7 @@ enum PodTableLayout {
                 + metricsColumnGroupWidth
                 + statusTotalWidth
                 + nodeWidth
+                + nodePoolWidth
                 + podIPWidth
                 + favoriteColumnWidth
                 + (metricsSpacing * 4)
@@ -931,6 +933,7 @@ enum PodTableLayout {
             + ageWidth
             + statusTotalWidth
             + nodeWidth
+            + nodePoolWidth
             + podIPWidth
             + favoriteColumnWidth
     }
@@ -1088,6 +1091,7 @@ public struct RuneRootView: View {
     private let forcedManifestInlineEditorImplementation: ManifestInlineEditorImplementation?
     private let forcedInitialSidebarWidth: Double?
     private let forcedInitialDetailWidth: Double?
+    private let podInspectorPresentation: RunePodInspectorPresentation
     private let workspaceChromeMountDelayNanoseconds: UInt64 = 80_000_000
 
     @AppStorage(RuneSettingsKeys.layoutSidebarWidth) private var persistedSidebarWidth = 280.0
@@ -1106,6 +1110,8 @@ public struct RuneRootView: View {
     @State private var layoutProbeFrames: [RuneRootLayoutProbeKind: CGRect] = [:]
     @State private var lastLayoutSnapshot: RuneRootLayoutSnapshot?
     @State private var podInspectorTab: PodInspectorTab = .overview
+    @State private var isPodInspectorWindowPresented = false
+    @State private var podInspectorPresentationID: UUID?
     @State private var serviceInspectorTab: ServiceInspectorTab = .overview
     @State private var deploymentInspectorTab: DeploymentInspectorTab = .overview
     @State private var showsHistoricalDeploymentReplicaSets = false
@@ -1177,6 +1183,7 @@ public struct RuneRootView: View {
         viewModel: RuneAppViewModel,
         onLayoutSnapshotChange: ((RuneRootLayoutSnapshot) -> Void)?,
         debugDisableBootstrap: Bool,
+        podInspectorPresentation: RunePodInspectorPresentation = .window,
         debugDisableLayoutPersistence: Bool? = nil,
         initialPodInspectorTab: PodInspectorTab = .overview,
         initialServiceInspectorTab: ServiceInspectorTab = .overview,
@@ -1191,6 +1198,7 @@ public struct RuneRootView: View {
         self.viewModel = viewModel
         self.onLayoutSnapshotChange = onLayoutSnapshotChange
         self.debugDisableBootstrap = debugDisableBootstrap
+        self.podInspectorPresentation = podInspectorPresentation
         self.debugDisableLayoutPersistence = debugDisableLayoutPersistence ?? debugDisableBootstrap
         self.forcedShellVariant = shellVariant
         self.forcedManifestInlineEditorImplementation = manifestInlineEditorImplementation
@@ -1204,6 +1212,11 @@ public struct RuneRootView: View {
     }
 
     public var body: some View {
+        workspaceContent
+            .background { podInspectorWindowPresenter }
+    }
+
+    private var workspaceWithDialogs: some View {
         ZStack(alignment: .topLeading) {
             background
             WindowChromeConfigurator(
@@ -1278,6 +1291,10 @@ public struct RuneRootView: View {
                 )
             }
         }
+    }
+
+    private var workspaceSelectionContent: some View {
+        workspaceWithDialogs
         .onPreferenceChange(RuneRootLayoutFramePreferenceKey.self) { frames in
             layoutProbeFrames = frames.compactMapValues { frame in
                 guard frame.generation == layoutGeneration else { return nil }
@@ -1287,16 +1304,38 @@ public struct RuneRootView: View {
         }
         .onChange(of: viewModel.state.selectedSection) { _, section in
             advanceLayoutGeneration()
+            if section != .workloads { isPodInspectorWindowPresented = false }
             guard section == .overview, !overviewCardModules.isEmpty else { return }
             overviewCardSelectionIndex = min(overviewCardSelectionIndex, overviewCardModules.count - 1)
         }
         .onChange(of: viewModel.state.selectedWorkloadKind) { _, _ in
             advanceLayoutGeneration()
+            if !isPodBrowser { isPodInspectorWindowPresented = false }
         }
+        .onChange(of: viewModel.state.selectedContext?.name) { _, _ in
+            isPodInspectorWindowPresented = false
+        }
+        .onChange(of: viewModel.state.selectedNamespace) { _, _ in
+            isPodInspectorWindowPresented = false
+        }
+        .onChange(of: viewModel.state.selectedPod?.id) { _, id in
+            if id == nil { isPodInspectorWindowPresented = false }
+        }
+        .onChange(of: isPodInspectorWindowPresented) { _, isPresented in
+            if !isPresented, podInspectorTab == .logs {
+                viewModel.isLogTailModeEnabled = false
+            }
+        }
+    }
+
+    private var workspaceInspectorContent: some View {
+        workspaceSelectionContent
         .modifier(helmSelectionSyncModifier)
         .onChange(of: podInspectorTab) { _, tab in
             syncSavedWorkspaceInspectorState()
-            if tab == .logs {
+            if isPodBrowser, podInspectorPresentation == .window, isPodInspectorWindowPresented {
+                if tab != .logs { viewModel.refreshResourceInspectorOnly() }
+            } else if tab == .logs {
                 viewModel.reloadLogsForSelection()
             }
         }
@@ -1330,6 +1369,10 @@ public struct RuneRootView: View {
             }
             restoreTerminalWorkspaceStateIfNeeded()
         }
+    }
+
+    private var workspaceContent: some View {
+        workspaceInspectorContent
         .onChange(of: viewModel.isSidebarVisible) { _, isVisible in
             if !isVisible, keyboardPaneFocus == .sidebarSections || keyboardPaneFocus == .sidebarContexts {
                 keyboardPaneFocus = .content
@@ -1766,11 +1809,16 @@ public struct RuneRootView: View {
                     .help(viewModel.isSidebarVisible ? "Hide Sidebar" : "Show Sidebar")
 
                     Button {
-                        viewModel.toggleDetailPaneVisibility()
+                        if isPodBrowser, podInspectorPresentation == .window {
+                            if let pod = viewModel.state.selectedPod { openPodInspector(pod) }
+                        } else {
+                            viewModel.toggleDetailPaneVisibility()
+                        }
                     } label: {
                         Image(systemName: "sidebar.right")
                     }
-                    .help(viewModel.isDetailPaneVisible ? "Hide Inspector" : "Show Inspector")
+                    .help(isPodBrowser && podInspectorPresentation == .window
+                          ? "Open Pod Details" : viewModel.isDetailPaneVisible ? "Hide Inspector" : "Show Inspector")
 
                     Menu {
                         ForEach(viewModel.contextMenuOptions) { context in
@@ -2527,7 +2575,7 @@ public struct RuneRootView: View {
     private var mainSplitContainer: some View {
         switch resolvedShellVariant {
         case .navigationSplitView:
-            if !viewModel.isSidebarVisible || !viewModel.isDetailPaneVisible {
+            if !viewModel.isSidebarVisible || !showsDockedInspector {
                 compactPanelSplitContainer
             } else {
                 NavigationSplitView {
@@ -2585,12 +2633,12 @@ public struct RuneRootView: View {
                                 .offset(x: 7)
                         }
                 ),
-                detail: AnyView(
+                detail: showsDockedInspector ? AnyView(
                     detailPane
                         .runeAppKitFrameReporter("detail")
-                ),
+                ) : AnyView(EmptyView()),
                 sidebarVisible: viewModel.isSidebarVisible,
-                detailVisible: viewModel.isDetailPaneVisible,
+                detailVisible: showsDockedInspector,
                 sidebarWidth: resolvedSidebarWidth,
                 detailWidth: resolvedDetailWidth,
                 onSidebarWidthChange: { width in
@@ -2606,7 +2654,7 @@ public struct RuneRootView: View {
 
     @ViewBuilder
     private var compactPanelSplitContainer: some View {
-        if !viewModel.isSidebarVisible && !viewModel.isDetailPaneVisible {
+        if !viewModel.isSidebarVisible && !showsDockedInspector {
             contentPane
                 .runeAppKitFrameReporter("content")
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -2638,7 +2686,7 @@ public struct RuneRootView: View {
                         alignment: .topLeading
                     )
 
-                if viewModel.isDetailPaneVisible {
+                if showsDockedInspector {
                     detailPane
                         .runeAppKitFrameReporter("detail")
                         .background(RuneRootPaneWidthReporter(kind: .detail))
@@ -5078,25 +5126,23 @@ public struct RuneRootView: View {
                             viewModel.toggleFavoriteResource(kind: .pod, namespace: pod.namespace, name: pod.name)
                         },
                         onOpenLogs: { pod in
-                            viewModel.selectPod(pod)
-                            podInspectorTab = .logs
-                            viewModel.reloadLogsForSelection()
+                            openPodInspector(pod, tab: .logs)
                         },
                         onOpenExec: { pod in
-                            viewModel.selectPod(pod)
-                            podInspectorTab = .exec
+                            openPodInspector(pod, tab: .exec)
                         },
                         onOpenDescribe: { pod in
-                            viewModel.selectPod(pod)
-                            podInspectorTab = .describe
+                            openPodInspector(pod, tab: .describe)
                         },
                         onOpenYAML: { pod in
-                            viewModel.selectPod(pod)
-                            podInspectorTab = .yaml
+                            openPodInspector(pod, tab: .yaml)
                         },
                         onDelete: { pod in
                             viewModel.requestDeleteResource(kind: .pod, name: pod.name)
-                        }
+                        },
+                        onOpenNode: openPodNodeDetails,
+                        onActivatePod: { openPodInspector($0) },
+                        nodePoolNamesByNode: viewModel.nodePoolNamesByNode
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .transaction { transaction in
@@ -5868,6 +5914,7 @@ public struct RuneRootView: View {
 
     private var nodeDetails: some View {
         genericResourceDetails(resource: viewModel.state.selectedNode) {
+            podOverviewRow(title: "Node Pool", value: viewModel.state.selectedNode?.nodePoolName ?? "—", symbol: "square.stack.3d.up")
             let relatedPods = viewModel.selectedNodeRelatedPods
             if !relatedPods.isEmpty {
                 RelatedPodsRelationshipSection(pods: relatedPods, open: viewModel.openNodeRelatedPod)
@@ -6124,6 +6171,8 @@ public struct RuneRootView: View {
                     copyAccessibilityLabel: "Copy Pod name",
                     bodyScrollBehavior: podInspectorTab == .overview ? .vertical : .selfManaged,
                     showsActions: podInspectorTab == .overview,
+                    tabsAtTop: true,
+                    showsIdentityAndInfo: podInspectorTab != .logs,
                     onCopy: { copyToClipboard(pod.name) },
                     onRefresh: refreshDetailPane,
                     info: {
@@ -6159,6 +6208,7 @@ public struct RuneRootView: View {
                                 isLoadingResources: viewModel.state.isLoading,
                                 errorMessage: viewModel.state.lastLogFetchError,
                                 statusText: logStatusText,
+                                showsControls: podInspectorPresentation != .window,
                                 containerOptions: viewModel.podLogContainerOptions,
                                 logText: viewModel.state.podLogs,
                                 readOnlyResetID: "podlogs:\(viewModel.state.selectedPod?.name ?? ""):\(viewModel.selectedLogPreset.id):\(viewModel.includePreviousLogs):\(viewModel.selectedLogContainer)",
@@ -6179,6 +6229,17 @@ public struct RuneRootView: View {
                                 onCopyAll: { viewModel.copyCurrentLogsToClipboard() },
                                 onToggleStreamPause: { viewModel.toggleLogStreamPause() }
                             )
+                            .onAppear {
+                                if podInspectorPresentation == .window {
+                                    viewModel.isLogStreamPaused = false
+                                    viewModel.isLogTailModeEnabled = true
+                                }
+                            }
+                            .onDisappear {
+                                if podInspectorPresentation == .window {
+                                    viewModel.isLogTailModeEnabled = false
+                                }
+                            }
 
                         case .exec:
                             execPane(for: pod)
@@ -7890,7 +7951,10 @@ public struct RuneRootView: View {
         case .content:
             if viewModel.state.selectedSection == .overview {
                 openSelectedOverviewCard()
-            } else if viewModel.isDetailPaneVisible {
+            } else if isPodBrowser, podInspectorPresentation == .window,
+                      let pod = viewModel.state.selectedPod {
+                openPodInspector(pod)
+            } else if showsDockedInspector {
                 keyboardPaneFocus = .detail
             }
         case .detail:
@@ -7903,7 +7967,7 @@ public struct RuneRootView: View {
         // current preference so changes made in Settings apply without a restart.
         RuneRootKeyboardPaneNavigation.availablePanes(
             sidebarVisible: viewModel.isSidebarVisible,
-            detailVisible: viewModel.isDetailPaneVisible,
+            detailVisible: showsDockedInspector,
             skipsClusterPane: UserDefaults.standard.bool(forKey: RuneSettingsKeys.skipClusterOnTabNavigationFromSections)
         )
     }
@@ -9073,7 +9137,7 @@ public struct RuneRootView: View {
     }
 
     private var compactDetailIdealWidth: CGFloat {
-        guard !viewModel.isSidebarVisible, viewModel.isDetailPaneVisible else {
+        guard !viewModel.isSidebarVisible, showsDockedInspector else {
             return resolvedDetailWidth
         }
 
@@ -9769,7 +9833,23 @@ public struct RuneRootView: View {
             podOverviewRow(title: "Age", value: pod.ageDescription, symbol: "clock")
             Divider()
                 .opacity(0.45)
-            podOverviewRow(title: "Node", value: pod.nodeName ?? "—", symbol: "server.rack")
+            RuneInspectorInfoRow("Node", systemImage: "server.rack") {
+                if let nodeName = pod.nodeName?.trimmingCharacters(in: .whitespacesAndNewlines), !nodeName.isEmpty {
+                    HStack(spacing: 6) {
+                        Button(nodeName) { openPodNodeDetails(pod) }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.tint)
+                            .font(.body.weight(.medium))
+                            .help("Show details for node \(nodeName)")
+                            .accessibilityLabel("Open node \(nodeName)")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        copyButton(value: nodeName, label: "node")
+                    }
+                } else {
+                    Text("—")
+                }
+            }
+            podOverviewRow(title: "Node Pool", value: viewModel.nodePoolName(for: pod) ?? "—", symbol: "square.stack.3d.up")
             if let node = viewModel.selectedPodRelatedNode {
                 ResourceRelationshipSection(title: "Scheduled Node") {
                     ResourceRelationshipLinkButton(
@@ -9802,6 +9882,62 @@ public struct RuneRootView: View {
 
     private func podInspectorCoreInfo(_ pod: PodSummary) -> some View {
         RunePodInspectorSummary(pod: pod)
+    }
+
+    private func openPodNodeDetails(_ pod: PodSummary) {
+        isPodInspectorWindowPresented = false
+        genericResourceManifestTab = .describe
+        viewModel.openPodNode(pod)
+    }
+
+    private var showsDockedInspector: Bool {
+        viewModel.isDetailPaneVisible && (podInspectorPresentation == .docked || !isPodBrowser)
+    }
+
+    private var podInspectorWindowContent: AnyView {
+        AnyView(
+            podDetails
+                .padding(8)
+                .background(background)
+                .runeInterfaceTypography(configuredFontSize: configuredAppFontSize,
+                                         systemDynamicTypeSize: dynamicTypeSize)
+                .runeAppearanceTheme(activeAppearanceTheme)
+        )
+    }
+
+    @ViewBuilder
+    private var podInspectorWindowPresenter: some View {
+        if podInspectorPresentation == .window {
+            PodInspectorWindow(
+                isPresented: $isPodInspectorWindowPresented,
+                presentationID: podInspectorPresentationID,
+                title: podInspectorWindowTitle,
+                content: podInspectorWindowContent
+            )
+            .frame(width: 0, height: 0)
+        }
+    }
+
+    private var podInspectorWindowTitle: String {
+        guard let pod = viewModel.state.selectedPod else { return "Pod Details" }
+        return "\(pod.name) · \(pod.namespace)"
+    }
+
+    private func openPodInspector(_ pod: PodSummary, tab: PodInspectorTab? = nil) {
+        podInspectorTab = tab ?? .logs
+        if viewModel.state.selectedPod?.id != pod.id || viewModel.state.selectedWorkloadKind != .pod {
+            viewModel.selectPod(pod)
+        } else if !isPodInspectorWindowPresented,
+                  !viewModel.state.isLoadingResourceDetails,
+                  !viewModel.state.isLoadingLogs {
+            viewModel.refreshResourceInspectorOnly()
+        }
+        if podInspectorPresentation == .window {
+            podInspectorPresentationID = UUID()
+            isPodInspectorWindowPresented = true
+        } else {
+            viewModel.isDetailPaneVisible = true
+        }
     }
 
     private func podOverviewRow(title: String, value: String, symbol: String) -> some View {

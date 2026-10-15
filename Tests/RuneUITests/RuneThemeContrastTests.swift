@@ -143,7 +143,7 @@ final class RuneThemeContrastTests: XCTestCase {
                 host.layoutSubtreeIfNeeded()
                 RunLoop.main.run(until: Date().addingTimeInterval(0.02))
             }
-            let fields = descendants(host).compactMap { $0 as? NSTextField }.filter { !$0.stringValue.isEmpty }
+            let fields = descendants(host).compactMap { $0 as? NSTextField }.filter { !$0.stringValue.isEmpty && !$0.isHiddenOrHasHiddenAncestor }
             XCTAssertGreaterThan(fields.count, 10, "Expected real AppKit resource cells")
             for field in fields {
                 var parent = field.superview
@@ -155,6 +155,9 @@ final class RuneThemeContrastTests: XCTestCase {
                 guard let row else { continue }
                 var background = RuneThemeContrast.RGB(NSColor(palette.row))
                 if row.isSelected { background = RuneThemeContrast.RGB(NSColor(palette.accentFill)).over(background, opacity: Double(theme.appKitPalette!.selectedAlpha)) }
+                if let resourceRow = row as? RuneAppKitResourceTableRowView {
+                    background = RuneThemeContrast.RGB(resourceRow.resolvedBackgroundColor)
+                }
                 if let fill = field.superview?.layer?.backgroundColor, let color = NSColor(cgColor: fill) {
                     background = RuneThemeContrast.RGB(color).over(background)
                 }
@@ -229,7 +232,7 @@ final class RuneThemeContrastTests: XCTestCase {
                     samples.append(try XCTUnwrap(bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh / 2)))
                 }
                 XCTAssertEqual(RuneThemeColorParser.rgbaHex(samples[0]), RuneThemeColorParser.rgbaHex(samples[1]), "Window backdrop must not alter \(name) row contrast")
-                for field in descendants(row).compactMap({ $0 as? NSTextField }).filter({ !$0.stringValue.isEmpty }) {
+                for field in descendants(row).compactMap({ $0 as? NSTextField }).filter({ !$0.stringValue.isEmpty && !$0.isHiddenOrHasHiddenAncestor }) {
                     var background = RuneThemeContrast.RGB(samples[0])
                     if let fill = field.superview?.layer?.backgroundColor, let tint = NSColor(cgColor: fill) {
                         background = RuneThemeContrast.RGB(tint).over(background)
@@ -259,7 +262,7 @@ final class RuneThemeContrastTests: XCTestCase {
                 RunLoop.main.run(until: Date().addingTimeInterval(0.03))
             }
             let label = try XCTUnwrap(descendants(host).compactMap { $0 as? NSTextField }.first { $0.stringValue == "sample-0" })
-            let expected = runeResourceCellColor(.labelColor, theme: theme)
+            let expected = runeResourceCellColor(.labelColor, theme: theme, in: label)
             XCTAssertEqual(RuneThemeColorParser.rgbaHex(try XCTUnwrap(label.textColor)), RuneThemeColorParser.rgbaHex(expected), "Visible cell must follow \(appearance)")
         }
     }

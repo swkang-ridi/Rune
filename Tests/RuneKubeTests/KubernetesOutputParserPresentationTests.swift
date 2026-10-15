@@ -1,7 +1,61 @@
 import RuneKube
+import RuneCore
 import XCTest
 
 final class KubernetesOutputParserPresentationTests: XCTestCase {
+    func testListAndWatchPodDocumentsShowContainerFailuresAndTerminationImmediately() throws {
+        let parser = KubernetesOutputParser()
+        let cases: [(String, [String: Any], [String: Any])] = [
+            ("Terminating", ["deletionTimestamp": "2026-10-15T00:00:00Z"], ["phase": "Running"]),
+            ("ImagePullBackOff", [:], ["phase": "Pending", "containerStatuses": [["state": ["waiting": ["reason": "ImagePullBackOff"]]]]]),
+            ("Init:Error", [:], ["phase": "Pending", "initContainerStatuses": [["state": ["terminated": ["reason": "Error", "exitCode": 1]]]]]),
+            ("Succeeded", [:], ["phase": "Succeeded", "containerStatuses": [["state": ["terminated": ["reason": "Completed", "exitCode": 0]]]]]),
+            ("Evicted", [:], ["phase": "Failed", "reason": "Evicted"])
+        ]
+        for (expected, extraMetadata, status) in cases {
+            var metadata: [String: Any] = ["name": "api", "namespace": "payments"]
+            metadata.merge(extraMetadata) { _, value in value }
+            let pod: [String: Any] = ["kind": "Pod", "metadata": metadata, "status": status]
+            let single = String(decoding: try JSONSerialization.data(withJSONObject: pod), as: UTF8.self)
+            let list = String(decoding: try JSONSerialization.data(withJSONObject: ["items": [pod]]), as: UTF8.self)
+            XCTAssertEqual(try parser.parseSinglePodJSON(namespace: "payments", from: single).status, expected)
+            XCTAssertEqual(try parser.parsePodsListJSON(namespace: "payments", from: list).first?.status, expected)
+        }
+    }
+
+    func testNodePoolsComeFromProviderLabelsWithStablePrecedence() throws {
+        let parser = KubernetesOutputParser()
+        let providerKeys = [
+            "karpenter.sh/nodepool", "eks.amazonaws.com/nodegroup", "cloud.google.com/gke-nodepool",
+            "kubernetes.azure.com/agentpool", "agentpool", "karpenter.sh/provisioner-name",
+            "alpha.eksctl.io/nodegroup-name"
+        ]
+        for key in providerKeys {
+            let data = try JSONSerialization.data(withJSONObject: ["items": [[
+                "metadata": ["name": "worker-a", "labels": [key: " application-pool "]],
+                "status": ["conditions": [["type": "Ready", "status": "True"]]]
+            ]]])
+            let nodes = try parser.parseNodes(from: String(decoding: data, as: UTF8.self))
+            XCTAssertEqual(nodes.first?.nodePoolName, "application-pool", key)
+            XCTAssertEqual(nodes.first?.primaryText, "Ready")
+        }
+        let nodes = try parser.parseNodes(from: #"""
+        {"items":[
+          {"metadata":{"name":"a","labels":{"karpenter.sh/nodepool":"current","karpenter.sh/provisioner-name":"old"}},"status":{}},
+          {"metadata":{"name":"b","labels":{"karpenter.sh/nodepool":"  ","eks.amazonaws.com/nodegroup":"managed"}},"status":{}},
+          {"metadata":{"name":"c","labels":{"unrelated":"unknown"}},"status":{}},
+          {"metadata":{"name":"d"},"status":{}}
+        ]}
+        """#)
+        XCTAssertEqual(nodes.map(\.nodePoolName), ["current", "managed", nil, nil])
+    }
+
+    func testOlderCachedNodeSummariesStillDecodeWithoutNodePool() throws {
+        let raw = #"{"kind":"node","name":"worker-a","primaryText":"Ready","secondaryText":"v1.34"}"#
+        let node = try JSONDecoder().decode(ClusterResourceSummary.self, from: Data(raw.utf8))
+        XCTAssertNil(node.nodePoolName)
+    }
+
     func testConfigMapSummariesUseSpecificPluralizedValueCounts() throws {
         let raw = #"""
         {

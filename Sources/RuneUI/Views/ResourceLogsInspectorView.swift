@@ -1060,6 +1060,7 @@ private struct ResourceLogsInspectorPaneCore: View {
     let logText: String
     let readOnlyResetID: String
     let actions: ResourceLogsPaneActions
+    var showsControls = true
     @AppStorage(RuneSettingsKeys.simpleMode) private var simpleMode = false
     @AppStorage(RuneSettingsKeys.interfaceLanguage) private var interfaceLanguageRaw =
         RuneSettingsKeys.interfaceLanguageDefault
@@ -1093,67 +1094,69 @@ private struct ResourceLogsInspectorPaneCore: View {
             : RuneUILayoutMetrics.inspectorSectionSpacing
 
         VStack(alignment: .leading, spacing: paneSpacing) {
-            ResourceLogsToolbar(
-                selectedLogPreset: $selectedLogPreset,
-                includePreviousLogs: $includePreviousLogs,
-                selectedContainer: source.selectedContainer,
-                isTailModeEnabled: $isTailModeEnabled,
-                isStreamPaused: $isStreamPaused,
-                statusText: statusText,
-                podOptions: source.podOptions,
-                selectedPodID: source.selectedPodID,
-                isFavoritePod: source.isFavoritePod,
-                onToggleFavoritePod: source.onToggleFavoritePod,
-                presentationStyle: presentationStyle,
-                showsContainerPicker: source.showsContainerPicker,
-                containerOptions: source.containerOptions,
-                sourceSummaryTitle: source.sourcePanelTitle,
-                sourceSummaryValues: source.sourcePanelValues,
-                visibleLogText: logText,
-                onReload: actions.onReload,
-                onSave: actions.onSave,
-                onSaveToExportFolder: actions.onSaveToExportFolder,
-                onSaveAndOpen: actions.onSaveAndOpen,
-                onSaveVisibleZip: actions.onSaveVisibleZip,
-                onSaveVisibleZipToExportFolder: actions.onSaveVisibleZipToExportFolder,
-                onSaveVisibleZipAndOpen: actions.onSaveVisibleZipAndOpen,
-                onSaveFullZip: actions.onSaveFullZip,
-                onSaveFullZipToExportFolder: actions.onSaveFullZipToExportFolder,
-                onSaveFullZipAndOpen: actions.onSaveFullZipAndOpen,
-                onSaveAllPodsZip: actions.onSaveAllPodsZip,
-                onSaveAllPodsZipToExportFolder: actions.onSaveAllPodsZipToExportFolder,
-                onSaveAllPodsZipAndOpen: actions.onSaveAllPodsZipAndOpen,
-                onCopySelection: actions.onCopySelection,
-                onCopyAll: actions.onCopyAll,
-                onToggleStreamPause: actions.onToggleStreamPause,
-                interfaceLanguageRaw: interfaceLanguageRaw
-            )
-            .id(interfaceLanguageRaw)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            if showsControls {
+                ResourceLogsToolbar(
+                    selectedLogPreset: $selectedLogPreset,
+                    includePreviousLogs: $includePreviousLogs,
+                    selectedContainer: source.selectedContainer,
+                    isTailModeEnabled: $isTailModeEnabled,
+                    isStreamPaused: $isStreamPaused,
+                    statusText: statusText,
+                    podOptions: source.podOptions,
+                    selectedPodID: source.selectedPodID,
+                    isFavoritePod: source.isFavoritePod,
+                    onToggleFavoritePod: source.onToggleFavoritePod,
+                    presentationStyle: presentationStyle,
+                    showsContainerPicker: source.showsContainerPicker,
+                    containerOptions: source.containerOptions,
+                    sourceSummaryTitle: source.sourcePanelTitle,
+                    sourceSummaryValues: source.sourcePanelValues,
+                    visibleLogText: logText,
+                    onReload: actions.onReload,
+                    onSave: actions.onSave,
+                    onSaveToExportFolder: actions.onSaveToExportFolder,
+                    onSaveAndOpen: actions.onSaveAndOpen,
+                    onSaveVisibleZip: actions.onSaveVisibleZip,
+                    onSaveVisibleZipToExportFolder: actions.onSaveVisibleZipToExportFolder,
+                    onSaveVisibleZipAndOpen: actions.onSaveVisibleZipAndOpen,
+                    onSaveFullZip: actions.onSaveFullZip,
+                    onSaveFullZipToExportFolder: actions.onSaveFullZipToExportFolder,
+                    onSaveFullZipAndOpen: actions.onSaveFullZipAndOpen,
+                    onSaveAllPodsZip: actions.onSaveAllPodsZip,
+                    onSaveAllPodsZipToExportFolder: actions.onSaveAllPodsZipToExportFolder,
+                    onSaveAllPodsZipAndOpen: actions.onSaveAllPodsZipAndOpen,
+                    onCopySelection: actions.onCopySelection,
+                    onCopyAll: actions.onCopyAll,
+                    onToggleStreamPause: actions.onToggleStreamPause,
+                    interfaceLanguageRaw: interfaceLanguageRaw
+                )
+                .id(interfaceLanguageRaw)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            ResourceLogsExplorePanel(
-                searchQuery: $searchQuery,
-                searchMatchCase: $searchMatchCase,
-                selectedSearchMatchIndex: $selectedSearchMatchIndex,
-                searchFocusRequestID: searchFocusRequestID,
-                searchResult: activeSearchResult,
-                structuredSummary: structuredLogSummary,
-                showsInsights: !simpleMode,
-                presentationStyle: presentationStyle,
-                placeholder: t(.searchLogs),
-                findHelp: t(.findInLogs),
-                matchCaseHelp: t(.matchCase),
-                onSearchFieldSample: { field, value in
-                    applyLogSearchQuery(ResourceStructuredLogFieldSearch.query(field: field, value: value))
-                },
-                onSearchDuplicate: { duplicate in
-                    applyLogSearchQuery(duplicate.fingerprint)
-                },
-                onSearchNavigate: {
-                    searchNavigationSequence &+= 1
-                }
-            )
-            .frame(maxWidth: .infinity, alignment: .leading)
+                ResourceLogsExplorePanel(
+                    searchQuery: $searchQuery,
+                    searchMatchCase: $searchMatchCase,
+                    selectedSearchMatchIndex: $selectedSearchMatchIndex,
+                    searchFocusRequestID: searchFocusRequestID,
+                    searchResult: activeSearchResult,
+                    structuredSummary: structuredLogSummary,
+                    showsInsights: !simpleMode,
+                    presentationStyle: presentationStyle,
+                    placeholder: t(.searchLogs),
+                    findHelp: t(.findInLogs),
+                    matchCaseHelp: t(.matchCase),
+                    onSearchFieldSample: { field, value in
+                        applyLogSearchQuery(ResourceStructuredLogFieldSearch.query(field: field, value: value))
+                    },
+                    onSearchDuplicate: { duplicate in
+                        applyLogSearchQuery(duplicate.fingerprint)
+                    },
+                    onSearchNavigate: {
+                        searchNavigationSequence &+= 1
+                    }
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
             ResourceLogsOutputSurface(
                 isLoadingLogs: isLoadingLogs,
@@ -1169,7 +1172,9 @@ private struct ResourceLogsInspectorPaneCore: View {
                 noMatchesMessage: source.noMatchesMessage,
                 readOnlyResetID: readOnlyResetID,
                 onReload: actions.onReload,
-                presentationStyle: presentationStyle
+                presentationStyle: presentationStyle,
+                followsLatestLogs: isTailModeEnabled && !isStreamPaused
+                    && searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             )
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -1220,7 +1225,7 @@ private struct ResourceLogsInspectorPaneCore: View {
 
     private func scheduleStructuredSummary(for text: String, debounced: Bool) {
         structuredSummaryTask?.cancel()
-        guard !simpleMode else {
+        guard showsControls, !simpleMode else {
             structuredLogSummary = ResourceStructuredLogAnalyzer.analyze(text: "")
             return
         }
@@ -1325,6 +1330,7 @@ struct PodLogsInspectorPane: View {
     var onToggleFavoritePod: (PodSummary) -> Void = { _ in }
     var presentationStyle: ResourceLogsPresentationStyle = .regular
     var showsContainerPicker: Bool = true
+    var showsControls = true
     let containerOptions: [String]
     let logText: String
     let readOnlyResetID: String
@@ -1367,7 +1373,8 @@ struct PodLogsInspectorPane: View {
             presentationStyle: presentationStyle,
             logText: logText,
             readOnlyResetID: readOnlyResetID,
-            actions: actions
+            actions: actions,
+            showsControls: showsControls
         )
     }
 
@@ -1477,13 +1484,14 @@ struct ResourceLogsOutputSurface: View {
     let readOnlyResetID: String
     let onReload: () -> Void
     let presentationStyle: ResourceLogsPresentationStyle
+    var followsLatestLogs = false
 
     var body: some View {
         InspectorTextSurface(
             minHeight: ResourceLogsLayoutMetrics.outputMinimumHeight(for: presentationStyle)
         ) {
             Group {
-                if isLoadingLogs || isLoadingResources {
+                if (isLoadingLogs || isLoadingResources) && logText.allSatisfy(\.isWhitespace) {
                     ResourceLogsLoadingPlaceholder()
                 } else if let errorMessage {
                     ResourceLogsErrorView(message: errorMessage, onReload: onReload)
@@ -1497,6 +1505,7 @@ struct ResourceLogsOutputSurface: View {
                         text: logText,
                         resetID: outputResetID,
                         resetScrollOnExternalChange: false,
+                        followsEndOfText: followsLatestLogs,
                         contentStyle: .ansiLogs,
                         usesLargeTextSurface: usesLargeTextSurface,
                         allowsAutomaticLargeTextSurface: false,

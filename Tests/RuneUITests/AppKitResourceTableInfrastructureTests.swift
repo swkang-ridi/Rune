@@ -1299,10 +1299,10 @@ final class AppKitResourceTableInfrastructureTests: XCTestCase {
         XCTAssertFalse(source.contains("private final class PodNSTableView"))
         XCTAssertFalse(source.contains("private final class DeploymentNSTableView"))
         XCTAssertFalse(source.contains("private final class ServiceNSTableView"))
-        XCTAssertTrue(source.contains("static let headerHeight: CGFloat = 24"))
-        XCTAssertTrue(source.contains("static let rowHeight: CGFloat = 34"))
+        XCTAssertTrue(source.contains("static let headerHeight: CGFloat = 28"))
+        XCTAssertTrue(source.contains("static let rowHeight: CGFloat = 16"))
         XCTAssertTrue(source.contains("button.widthAnchor.constraint(equalToConstant: RuneUILayoutMetrics.iconButtonSize)"))
-        XCTAssertTrue(source.contains("button.heightAnchor.constraint(equalToConstant: RuneUILayoutMetrics.iconButtonSize)"))
+        XCTAssertTrue(source.contains("button.heightAnchor.constraint(equalToConstant: min(RuneUILayoutMetrics.iconButtonSize, RuneAppKitResourceTableStyle.rowHeight))"))
     }
 
     func testAllResourceTablesUseSharedIdentifierBackedCellAndRowReuse() throws {
@@ -1565,7 +1565,7 @@ final class AppKitResourceTableInfrastructureTests: XCTestCase {
 
         XCTAssertEqual(
             pod.selection + pod.name + pod.cpu + pod.memory + pod.restarts + pod.age + pod.status
-                + pod.node + pod.podIP + pod.favorite,
+                + pod.node + pod.nodePool + pod.podIP + pod.favorite,
             expected,
             accuracy: 0.5
         )

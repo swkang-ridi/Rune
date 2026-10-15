@@ -5,6 +5,8 @@ public struct RuneFakeK8sFixture: Sendable {
     public let listKindsOmittingRemainingItemCount: Set<String>
     public let transientFailureTargets: Set<String>
     public let delayedResponseTargets: [String: UInt64]
+    public let logResponseSequences: [String: [String]]
+    public let watchResponseSequencesByPath: [String: [String]]
     public let selfSubjectAccessReviewDenials: Set<RuneFakeK8sRBACRule>
 
     public init(
@@ -12,12 +14,16 @@ public struct RuneFakeK8sFixture: Sendable {
         listKindsOmittingRemainingItemCount: Set<String> = [],
         transientFailureTargets: Set<String> = [],
         delayedResponseTargets: [String: UInt64] = [:],
+        logResponseSequences: [String: [String]] = [:],
+        watchResponseSequencesByPath: [String: [String]] = [:],
         selfSubjectAccessReviewDenials: Set<RuneFakeK8sRBACRule> = []
     ) {
         self.contexts = contexts
         self.listKindsOmittingRemainingItemCount = listKindsOmittingRemainingItemCount
         self.transientFailureTargets = transientFailureTargets
         self.delayedResponseTargets = delayedResponseTargets
+        self.logResponseSequences = logResponseSequences
+        self.watchResponseSequencesByPath = watchResponseSequencesByPath
         self.selfSubjectAccessReviewDenials = selfSubjectAccessReviewDenials
     }
 
@@ -214,6 +220,15 @@ public struct RuneFakeK8sNode: Sendable {
     public let internalIP: String
     public let cpu: String
     public let memory: String
+    public let labels: [String: String]
+
+    public init(name: String, internalIP: String, cpu: String, memory: String, labels: [String: String] = [:]) {
+        self.name = name
+        self.internalIP = internalIP
+        self.cpu = cpu
+        self.memory = memory
+        self.labels = labels
+    }
 }
 
 public struct RuneFakeK8sOperatorResource: Sendable {

@@ -221,6 +221,12 @@ public final class KubernetesClient: ContextListingService, NamespaceListingServ
         return mergePodNameMetrics(pods, metrics)
     }
 
+    public func podResourceUsage(
+        from sources: [KubeConfigSource], context: KubeContext, namespace: String
+    ) async throws -> [String: (cpu: String, memory: String)] {
+        try await podMetricsByNameViaREST(environment: kubeconfigEnvironment(from: sources), context: context, namespace: namespace)
+    }
+
     public func watchResourceChanges(
         from sources: [KubeConfigSource],
         context: KubeContext,
