@@ -1007,13 +1007,13 @@ public final class RuneAppState: ObservableObject {
     }
 
     public func setPodLogs(_ logs: String) {
-        podLogs = logs
+        assignIfChanged(\.podLogs, logs)
         lastLogFetchError = nil
         lastLogUpdatedAt = Date()
     }
 
     public func showCachedPodLogs(contextName: String, namespace: String, podName: String) {
-        podLogs = cachedLogs(contextName: contextName, namespace: namespace, kind: .pod, resourceName: podName)
+        assignIfChanged(\.podLogs, cachedLogs(contextName: contextName, namespace: namespace, kind: .pod, resourceName: podName))
     }
 
     public func appendPodLogRead(
@@ -1053,27 +1053,28 @@ public final class RuneAppState: ObservableObject {
             kind: .pod,
             resourceName: podName,
             sourceNames: [podName],
-            loadedAt: loadedAt
+            loadedAt: loadedAt,
+            includesFetchTimestamp: false
         )
         let bounded = boundedSessionLogCache(segment)
         updateSessionLogCache(key: key, value: bounded)
         // Keep the active snapshot complete. Only the warm, per-resource cache is bounded;
         // otherwise wide JSON lines can make an "All logs" read look like a ~200-line tail.
-        podLogs = segment
+        assignIfChanged(\.podLogs, segment)
         lastLogFetchError = nil
         lastLogUpdatedAt = loadedAt
     }
 
     public func setUnifiedServiceLogs(_ logs: String, pods: [String]) {
-        unifiedServiceLogs = logs
-        unifiedServiceLogPods = pods
+        assignIfChanged(\.unifiedServiceLogs, logs)
+        assignIfChanged(\.unifiedServiceLogPods, pods)
         lastLogFetchError = nil
         lastLogUpdatedAt = Date()
     }
 
     public func showCachedUnifiedLogs(contextName: String, namespace: String, kind: KubeResourceKind, resourceName: String) {
-        unifiedServiceLogs = cachedLogs(contextName: contextName, namespace: namespace, kind: kind, resourceName: resourceName)
-        unifiedServiceLogPods = []
+        assignIfChanged(\.unifiedServiceLogs, cachedLogs(contextName: contextName, namespace: namespace, kind: kind, resourceName: resourceName))
+        assignIfChanged(\.unifiedServiceLogPods, [])
     }
 
     public func appendUnifiedServiceLogRead(
@@ -1117,12 +1118,13 @@ public final class RuneAppState: ObservableObject {
             kind: kind,
             resourceName: resourceName,
             sourceNames: pods,
-            loadedAt: loadedAt
+            loadedAt: loadedAt,
+            includesFetchTimestamp: false
         )
         let bounded = boundedSessionLogCache(segment)
         updateSessionLogCache(key: key, value: bounded)
-        unifiedServiceLogs = segment
-        unifiedServiceLogPods = pods
+        assignIfChanged(\.unifiedServiceLogs, segment)
+        assignIfChanged(\.unifiedServiceLogPods, pods)
         lastLogFetchError = nil
         lastLogUpdatedAt = loadedAt
     }
@@ -1701,14 +1703,17 @@ public final class RuneAppState: ObservableObject {
         kind: KubeResourceKind,
         resourceName: String,
         sourceNames: [String],
-        loadedAt: Date
+        loadedAt: Date,
+        includesFetchTimestamp: Bool = true
     ) -> String {
-        let timestamp = ISO8601DateFormatter().string(from: loadedAt)
+        // A current snapshot has a stable heading. Fetch time belongs in status, not
+        // in the document, where it would invalidate unchanged log text on every poll.
+        let timestamp = includesFetchTimestamp ? "\(ISO8601DateFormatter().string(from: loadedAt))  " : ""
         let sourceSummary = sourceNames.isEmpty ? "" : "\nSources: \(sourceNames.joined(separator: ", "))"
         let body = logs.trimmingCharacters(in: .newlines)
         return """
         ────────────────────────────────────────────────────────────
-        \(timestamp)  \(kind.singularTypeName)  \(namespace)/\(resourceName)
+        \(timestamp)\(kind.singularTypeName)  \(namespace)/\(resourceName)
         Context: \(contextName)\(sourceSummary)
         ────────────────────────────────────────────────────────────
         \(body.isEmpty ? "[no log lines returned]" : body)
@@ -1722,7 +1727,9 @@ public final class RuneAppState: ObservableObject {
     }
 
     private func updateSessionLogCache(key: String, value: String) {
-        sessionLogCache[key] = value
+        if sessionLogCache[key] != value {
+            sessionLogCache[key] = value
+        }
         touchSessionLogCacheKey(key)
         pruneSessionLogCacheEntriesIfNeeded()
     }

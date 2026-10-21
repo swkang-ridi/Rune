@@ -80,13 +80,15 @@ public struct KubernetesOutputParser {
 
                 let restartToken = parts.count >= 3 ? parts[2] : "0"
                 let createdToken = parts.count >= 4 ? parts[3] : nil
+                let creationDate = KubernetesAgeFormatting.creationDate(from: createdToken)
 
                 return PodSummary(
                     name: parts[0],
                     namespace: namespace,
                     status: parts[1],
                     totalRestarts: parseRestartCount(restartToken),
-                    ageDescription: KubernetesAgeFormatting.describe(creationISO8601: createdToken),
+                    ageDescription: KubernetesAgeFormatting.describe(creationDate: creationDate),
+                    creationDate: creationDate,
                     cpuUsage: nil,
                     memoryUsage: nil
                 )
@@ -107,13 +109,15 @@ public struct KubernetesOutputParser {
 
                 let restartToken = parts.count >= 4 ? parts[3] : "0"
                 let createdToken = parts.count >= 5 ? parts[4] : nil
+                let creationDate = KubernetesAgeFormatting.creationDate(from: createdToken)
 
                 return PodSummary(
                     name: parts[1],
                     namespace: parts[0],
                     status: parts[2],
                     totalRestarts: parseRestartCount(restartToken),
-                    ageDescription: KubernetesAgeFormatting.describe(creationISO8601: createdToken),
+                    ageDescription: KubernetesAgeFormatting.describe(creationDate: creationDate),
+                    creationDate: creationDate,
                     cpuUsage: nil,
                     memoryUsage: nil
                 )
@@ -131,7 +135,7 @@ public struct KubernetesOutputParser {
         guard let item = try JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any] else {
             throw RuneError.parseError(message: "Kubernetes Pod JSON must be an object.")
         }
-        var ageCache: [String: String] = [:]
+        var ageCache: [String: (creationDate: Date?, description: String)] = [:]
         guard let pod = podSummaryFromJSONObject(item, defaultNamespace: namespace, allNamespaces: false, ageCache: &ageCache) else {
             throw RuneError.parseError(message: "Kubernetes Pod JSON is missing its name.")
         }
@@ -224,7 +228,8 @@ public struct KubernetesOutputParser {
     private func podSummaryFromJSONItem(_ item: KubePodItem, namespace: String) -> PodSummary {
         let phase = (item.status?.phase ?? "Unknown").trimmingCharacters(in: .whitespacesAndNewlines)
         let restarts = restartSum(from: item.status)
-        let age = KubernetesAgeFormatting.describe(creationISO8601: item.metadata.creationTimestamp)
+        let creationDate = KubernetesAgeFormatting.creationDate(from: item.metadata.creationTimestamp)
+        let age = KubernetesAgeFormatting.describe(creationDate: creationDate)
         let spec = item.spec
         let st = item.status
         func nonEmpty(_ s: String?) -> String? {
@@ -246,6 +251,7 @@ public struct KubernetesOutputParser {
             status: phase,
             totalRestarts: restarts,
             ageDescription: age,
+            creationDate: creationDate,
             cpuUsage: nil,
             memoryUsage: nil,
             podIP: nonEmpty(st?.podIP),
@@ -282,7 +288,7 @@ public struct KubernetesOutputParser {
             throw RuneError.parseError(message: "Kubernetes pod list JSON could not be parsed")
         }
         let rawItems = root["items"] as? [[String: Any]] ?? []
-        var ageCache: [String: String] = [:]
+        var ageCache: [String: (creationDate: Date?, description: String)] = [:]
         var pods: [PodSummary] = []
         pods.reserveCapacity(rawItems.count)
 
@@ -338,7 +344,7 @@ public struct KubernetesOutputParser {
         _ item: [String: Any],
         defaultNamespace: String,
         allNamespaces: Bool,
-        ageCache: inout [String: String]
+        ageCache: inout [String: (creationDate: Date?, description: String)]
     ) -> PodSummary? {
         guard let metadata = item["metadata"] as? [String: Any],
               let name = nonEmpty(metadata["name"] as? String) else {
@@ -362,10 +368,11 @@ public struct KubernetesOutputParser {
             .compactMap { ownerReferenceLine(kind: $0["kind"] as? String, name: $0["name"] as? String) }
             .joined(separator: ", ")
 
-        let ageDescription: String = {
-            guard let creationTimestamp else { return "—" }
+        let age: (creationDate: Date?, description: String) = {
+            guard let creationTimestamp else { return (nil, "—") }
             if let cached = ageCache[creationTimestamp] { return cached }
-            let age = KubernetesAgeFormatting.describe(creationISO8601: creationTimestamp)
+            let creationDate = KubernetesAgeFormatting.creationDate(from: creationTimestamp)
+            let age = (creationDate, KubernetesAgeFormatting.describe(creationDate: creationDate))
             ageCache[creationTimestamp] = age
             return age
         }()
@@ -393,7 +400,8 @@ public struct KubernetesOutputParser {
             totalRestarts: restartSum(from: containerStatuses)
                 + restartSum(from: initContainerStatuses)
                 + restartSum(from: ephemeralContainerStatuses),
-            ageDescription: ageDescription,
+            ageDescription: age.description,
+            creationDate: age.creationDate,
             cpuUsage: nil,
             memoryUsage: nil,
             podIP: nonEmpty(status?["podIP"] as? String),

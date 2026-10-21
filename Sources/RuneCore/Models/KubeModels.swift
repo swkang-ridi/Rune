@@ -348,7 +348,10 @@ public struct PodSummary: Identifiable, Hashable, Codable, Sendable {
     /// Total restarts Rune shows in the workloads table (sum of container restart counts).
     public let totalRestarts: Int
     /// Human-readable age from `metadata.creationTimestamp` (e.g. `5d`, `3h`).
-    public let ageDescription: String
+    public private(set) var ageDescription: String
+    /// Original creation time, retained so Age can advance without another Kubernetes response.
+    /// Optional so saved snapshots from earlier versions still decode.
+    public let creationDate: Date?
     /// Live CPU/memory strings when metrics are available for this row; otherwise nil and the UI shows an em dash.
     public let cpuUsage: String?
     public let memoryUsage: String?
@@ -381,6 +384,7 @@ public struct PodSummary: Identifiable, Hashable, Codable, Sendable {
         status: String,
         totalRestarts: Int = 0,
         ageDescription: String = "—",
+        creationDate: Date? = nil,
         cpuUsage: String? = nil,
         memoryUsage: String? = nil,
         podIP: String? = nil,
@@ -400,6 +404,7 @@ public struct PodSummary: Identifiable, Hashable, Codable, Sendable {
         self.status = status
         self.totalRestarts = totalRestarts
         self.ageDescription = ageDescription
+        self.creationDate = creationDate
         self.cpuUsage = cpuUsage
         self.memoryUsage = memoryUsage
         self.podIP = podIP
@@ -454,12 +459,20 @@ public struct PodSummary: Identifiable, Hashable, Codable, Sendable {
         PodSummary(
             name: name, namespace: namespace, status: status,
             totalRestarts: totalRestarts, ageDescription: ageDescription,
+            creationDate: creationDate,
             cpuUsage: cpu, memoryUsage: memory, podIP: podIP, hostIP: hostIP,
             nodeName: nodeName, qosClass: qosClass, containersReady: containersReady,
             containerNamesLine: containerNamesLine, initContainerNamesLine: initContainerNamesLine,
             ephemeralContainerNamesLine: ephemeralContainerNamesLine, labels: labels,
             containerImagesLine: containerImagesLine, ownerReferencesLine: ownerReferencesLine
         )
+    }
+
+    public func updatingAge(reference: Date = Date()) -> PodSummary {
+        guard let creationDate else { return self }
+        var updated = self
+        updated.ageDescription = KubernetesAgeFormatting.describe(creationDate: creationDate, reference: reference)
+        return updated
     }
 
     /// Merge a detail fetch into the table row: keep list metrics and age, fill IP, node, QoS, and readiness from the richer snapshot.
@@ -470,6 +483,7 @@ public struct PodSummary: Identifiable, Hashable, Codable, Sendable {
             status: status,
             totalRestarts: totalRestarts,
             ageDescription: ageDescription,
+            creationDate: creationDate ?? detail.creationDate,
             cpuUsage: cpuUsage ?? detail.cpuUsage,
             memoryUsage: memoryUsage ?? detail.memoryUsage,
             podIP: detail.podIP ?? podIP,
@@ -490,10 +504,11 @@ public struct PodSummary: Identifiable, Hashable, Codable, Sendable {
 public enum KubernetesAgeFormatting: Sendable {
     /// Compact age string (`30s`, `5m`, `2h`, `4d`, `1y`), matching common Kubernetes CLI conventions.
     public static func describe(creationISO8601: String?, reference: Date = Date()) -> String {
-        guard let raw = creationISO8601?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
-            return "—"
-        }
-        guard let created = parseRFC3339(raw) else { return "—" }
+        describe(creationDate: creationDate(from: creationISO8601), reference: reference)
+    }
+
+    public static func describe(creationDate: Date?, reference: Date = Date()) -> String {
+        guard let created = creationDate else { return "—" }
         let seconds = max(0, Int(reference.timeIntervalSince(created)))
         if seconds < 60 { return "\(seconds)s" }
         let minutes = seconds / 60
@@ -506,7 +521,8 @@ public enum KubernetesAgeFormatting: Sendable {
         return "\(max(1, years))y"
     }
 
-    private static func parseRFC3339(_ string: String) -> Date? {
+    public static func creationDate(from raw: String?) -> Date? {
+        guard let string = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !string.isEmpty else { return nil }
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         if let d = iso.date(from: string) { return d }

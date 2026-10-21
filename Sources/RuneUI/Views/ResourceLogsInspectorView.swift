@@ -9,6 +9,52 @@ enum ResourceLogsPresentationStyle: Hashable {
     case terminalCompact
 }
 
+struct PodLogContainerControl: View {
+    let pod: PodSummary
+    @Binding var selection: String
+    let allContainersTitle: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text("Container").foregroundStyle(.runeSecondary)
+            LogToolbarPopupPicker(
+                "Container", selection: $selection,
+                options: [.init(value: "", title: allContainersTitle)] + pod.logContainerNames.map { name in
+                    let suffix = pod.initContainerNames.contains(name) ? " (init)"
+                        : pod.ephemeralContainerNames.contains(name) ? " (debug)" : ""
+                    return .init(value: name, title: name + suffix)
+                }
+            )
+            .frame(width: 210)
+            .accessibilityIdentifier("pod-log-container-picker")
+        }
+        .font(.system(size: 12))
+        .controlSize(.small)
+        .fixedSize()
+    }
+}
+
+struct PodLogRecentMinutesControl: View {
+    @Binding var minutes: Int
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text("Last")
+            TextField("5", value: $minutes, format: .number.grouping(.never))
+                .textFieldStyle(.roundedBorder)
+                .multilineTextAlignment(.trailing)
+                .frame(width: 42)
+                .accessibilityLabel("Recent log minutes")
+                .accessibilityIdentifier("pod-log-recent-minutes")
+            Text("min")
+        }
+        .font(.system(size: 12))
+        .controlSize(.small)
+        .fixedSize()
+        .help("Show only logs from the last number of minutes.")
+    }
+}
+
 struct ResourceLogsLayoutMetrics {
     static let regularOutputMinimumHeight: CGFloat = 280
     static let terminalCompactOutputMinimumHeight: CGFloat = 210
@@ -1070,6 +1116,7 @@ private struct ResourceLogsInspectorPaneCore: View {
     @State private var searchNavigationSequence = 0
     @State private var searchFocusRequestID = 0
     @State private var searchResult = ResourceLogSearchResult.make(text: "", query: "")
+    @State private var searchResultResetID: String?
     @State private var searchTask: Task<Void, Never>?
     @State private var searchLifecycleGeneration = 0
     @State private var searchWorkLane =
@@ -1085,7 +1132,12 @@ private struct ResourceLogsInspectorPaneCore: View {
             query: searchQuery,
             matchCase: searchMatchCase
         ) ? searchResult : nil
-        let renderSearchResult = searchResult.isRenderableSnapshot(for: logText)
+        // Rolling tail windows need a fresh index even when their line count stays
+        // unchanged. Keep the previous indexed viewport mounted while it is built.
+        let canKeepIndexedViewport = searchResultResetID == readOnlyResetID
+            && ResourceLogsDeferredRenderingPolicy.shouldDeferOutputMount(for: logText)
+            && ResourceLogsDeferredRenderingPolicy.shouldDeferOutputMount(for: searchResult)
+        let renderSearchResult = searchResult.isRenderableSnapshot(for: logText) || canKeepIndexedViewport
             ? searchResult
             : nil
         let resolvedSearchMatchIndex = activeSearchResult?.clampedMatchIndex(selectedSearchMatchIndex) ?? 0
@@ -1203,6 +1255,10 @@ private struct ResourceLogsInspectorPaneCore: View {
             )
             scheduleStructuredSummary(for: newText, debounced: true)
         }
+        .onChange(of: readOnlyResetID) { _, _ in
+            searchLifecycleGeneration &+= 1
+            scheduleSearch(for: logText, debounceNanoseconds: 0)
+        }
         .onChange(of: simpleMode) { _, _ in
             scheduleStructuredSummary(for: logText, debounced: false)
         }
@@ -1256,6 +1312,7 @@ private struct ResourceLogsInspectorPaneCore: View {
         searchTask?.cancel()
         let requestedQuery = searchQuery
         let requestedMatchCase = searchMatchCase
+        let requestedResetID = readOnlyResetID
         let lifecycleGeneration = searchLifecycleGeneration
         let reusableTextIndex = searchResult.originalText == text ? searchResult.textIndex : nil
         let task = Task { @MainActor in
@@ -1289,6 +1346,7 @@ private struct ResourceLogsInspectorPaneCore: View {
                 return
             }
             searchResult = result
+            searchResultResetID = requestedResetID
             selectedSearchMatchIndex = result.clampedMatchIndex(selectedSearchMatchIndex)
             if isInitialSearchNavigationPending {
                 isInitialSearchNavigationPending = false

@@ -12,6 +12,76 @@ final class LivePodRefreshTests: XCTestCase {
     private let podName = "orbit-lens-6f58d7d89b-hx9q2"
     private let otherPodName = "ember-gate-75c9f746b8-kq2wm"
 
+    func testAgeAdvancesWithOnlyBookmarksWhileMetricsAreSlowAndStopsWhenLiveIsOff() async throws {
+        let harness = try await makeHarness(fixture: RuneFakeK8sFixture(
+            delayedResponseTargets: [metricsPath: 4_000_000_000],
+            watchResponseSequencesByPath: [podPath: [bookmark]]
+        ))
+        defer { harness.cleanup() }
+        harness.model.isLiveStatusUpdatesEnabled = true
+        try await waitUntil(timeout: 10) { !harness.model.state.isLoading && !harness.model.state.pods.isEmpty }
+        // Simulate a recently created Pod after the initial read. No subsequent Pod
+        // event or completed metrics response should be needed to advance its Age.
+        let pod = PodSummary(name: podName, namespace: "alpha-zone", status: "Running",
+                             ageDescription: "5s", creationDate: Date().addingTimeInterval(-5),
+                             cpuUsage: "42m", nodeName: "orbit-node-a")
+        harness.model.state.setPods([pod])
+        harness.model.state.setSelectedPod(pod)
+        let listCount = fullPodLists(harness.server).count
+        try await waitUntil(timeout: 2.5) {
+            let age = harness.model.state.selectedPod?.ageDescription
+            return age != nil && age != "5s"
+        }
+        XCTAssertEqual(harness.model.state.selectedPod?.status, "Running")
+        XCTAssertEqual(harness.model.state.selectedPod?.cpuUsage, "42m")
+        XCTAssertEqual(harness.store.snapshot(context: harness.context, namespace: "alpha-zone").pods, harness.model.state.pods)
+        XCTAssertEqual(fullPodLists(harness.server).count, listCount, "Advancing Age must not fetch the Pod list again.")
+
+        harness.model.isLiveStatusUpdatesEnabled = false
+        let stoppedAge = harness.model.state.selectedPod?.ageDescription
+        try await Task.sleep(for: .milliseconds(1300))
+        XCTAssertEqual(harness.model.state.selectedPod?.ageDescription, stoppedAge)
+    }
+
+    func testLiveLoadsMissingNodePoolsWithoutReloadingPodsWhenTheNodeCacheIsStale() async throws {
+        try await assertNodePoolRecovery(deliversPodChange: true)
+    }
+
+    func testLiveRecoversMissingNodePoolsEvenWhenOnlyBookmarksArrive() async throws {
+        try await assertNodePoolRecovery(deliversPodChange: false)
+    }
+
+    private func assertNodePoolRecovery(deliversPodChange: Bool) async throws {
+        let source = RuneFakeK8sFixture.defaultContexts[0]
+        let nodes = source.nodes.map { node in
+            RuneFakeK8sNode(name: node.name, internalIP: node.internalIP, cpu: node.cpu, memory: node.memory,
+                           labels: ["karpenter.sh/nodepool": "pool-\(node.name)"])
+        }
+        let changed = try lines([podEvent("MODIFIED", name: podName, phase: "Failed", version: "49")])
+        let harness = try await makeHarness(fixture: RuneFakeK8sFixture(
+            contexts: [RuneFakeK8sCluster(contextName: source.contextName, defaultNamespace: source.defaultNamespace,
+                                        namespaces: source.namespaces, nodes: nodes)],
+            watchResponseSequencesByPath: [podPath: deliversPodChange ? [bookmark, bookmark, bookmark, changed, bookmark] : [bookmark]]
+        ))
+        defer { harness.cleanup() }
+        harness.model.isLiveStatusUpdatesEnabled = true
+        try await waitUntil { !harness.model.state.isLoading && !harness.model.state.pods.isEmpty }
+        // Reproduce metadata that no longer covers the Nodes used by live Pods.
+        harness.model.state.setNodes([])
+        harness.store.cacheNodes([], context: harness.context)
+        XCTAssertTrue(harness.model.nodePoolNamesByNode.isEmpty)
+        let listCount = fullPodLists(harness.server).count
+        try await waitUntil {
+            guard let pod = harness.model.state.pods.first(where: { $0.name == self.podName }) else { return false }
+            return pod.status == (deliversPodChange ? "Failed" : "Running")
+                && harness.model.nodePoolName(for: pod) == (deliversPodChange ? "pool-orbit-node-b" : "pool-orbit-node-a")
+        }
+        XCTAssertEqual(harness.model.nodePoolNamesByNode["orbit-node-b"], "pool-orbit-node-b")
+        XCTAssertEqual(harness.store.nodes(context: harness.context), harness.model.state.nodes)
+        XCTAssertEqual(fullPodLists(harness.server).count, listCount, "Node metadata recovery must not trigger a full Pod refresh.")
+        XCTAssertNil(harness.model.state.lastError)
+    }
+
     func testWatchChangesReachRowsBeforeSlowSnapshotAndSurviveItsCompletion() async throws {
         let body = try lines([
             podEvent("MODIFIED", name: podName, phase: "Failed", version: "41"),
@@ -72,8 +142,10 @@ final class LivePodRefreshTests: XCTestCase {
         harness.model.isLiveStatusUpdatesEnabled = false
         try await Task.sleep(for: .milliseconds(100))
         let metricsCount = harness.server.requestLines().filter { $0.contains(self.metricsPath) }.count
+        let nodeCount = harness.server.requestLines().filter { $0.hasPrefix("GET /api/v1/nodes ") }.count
         try await Task.sleep(for: .milliseconds(3200))
         XCTAssertEqual(harness.server.requestLines().filter { $0.contains(self.metricsPath) }.count, metricsCount)
+        XCTAssertEqual(harness.server.requestLines().filter { $0.hasPrefix("GET /api/v1/nodes ") }.count, nodeCount)
     }
 
     func testExpiredWatchResynchronizesAndReconnectsWithoutExpiredVersion() async throws {

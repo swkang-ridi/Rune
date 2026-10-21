@@ -147,7 +147,9 @@ public struct RuneLargeTextSurface: View {
                     if pendingProgrammaticScrollLine == nil || didReachPendingTarget {
                         pendingProgrammaticScrollLine = nil
                     }
-                    if pendingProgrammaticScrollLine == nil, verticalOffset != renderOffset {
+                    // The measured viewport must remain renderable even if a pending
+                    // scroll target is delayed, cancelled, or never reached.
+                    if verticalOffset != renderOffset {
                         verticalOffset = renderOffset
                     }
                     onNearBottomChange(isNearBottom(verticalOffset: normalizedOffset, viewportHeight: viewportHeight))
@@ -208,7 +210,7 @@ public struct RuneLargeTextSurface: View {
     }
 
     private func sparseContent(viewportHeight: CGFloat) -> some View {
-        let visible = visibleViewport(viewportHeight: viewportHeight)
+        let viewports = renderedViewports(viewportHeight: viewportHeight)
         let contentHeight = layout(viewportHeight: viewportHeight).contentHeight
         let targetLine = scrollTargetLine.flatMap { line in
             line > 0 && line <= index.lineCount ? line : nil
@@ -239,28 +241,49 @@ public struct RuneLargeTextSurface: View {
                 )
             }
 
-            VStack(alignment: .leading, spacing: 0) {
-                // Keep the render window at its real layout position. A visual `offset` leaves the stack's
-                // layout frame at the top, so SwiftUI can cull every row when the scroll view moves deep.
-                Color.clear
-                    .frame(width: 1, height: yOffset(for: visible.startLine))
-
-                ForEach(visible.lines, id: \.number) { line in
-                    RuneLargeTextLineRow(
-                        line: line,
-                        searchMatches: searchMatches(in: line),
-                        showsLineNumbers: showsLineNumbers,
-                        fontSize: fontSize,
-                        lineNumberWidth: lineNumberColumnWidth,
-                        horizontalContentInset: horizontalContentInset,
-                        isActiveSearchLine: line.number == targetLine && activeSearchRange != nil
-                    )
-                    .frame(height: rowHeight, alignment: .topLeading)
-                }
+            ForEach(viewports, id: \.startLine) { visible in
+                renderWindow(visible)
             }
-            .padding(.trailing, 12)
         }
         .frame(minWidth: 1, minHeight: CGFloat(contentHeight), alignment: .topLeading)
+    }
+
+    private func renderWindow(_ visible: RuneLargeTextViewport) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Keep the render window at its real layout position. A visual `offset` leaves the stack's
+            // layout frame at the top, so SwiftUI can cull every row when the scroll view moves deep.
+            Color.clear
+                .frame(width: 1, height: yOffset(for: visible.startLine))
+
+            ForEach(visible.lines, id: \.number) { line in
+                RuneLargeTextLineRow(
+                    line: line,
+                    searchMatches: searchMatches(in: line),
+                    showsLineNumbers: showsLineNumbers,
+                    fontSize: fontSize,
+                    lineNumberWidth: lineNumberColumnWidth,
+                    horizontalContentInset: horizontalContentInset,
+                    isActiveSearchLine: line.number == scrollTargetLine && activeSearchRange != nil
+                )
+                .frame(height: rowHeight, alignment: .topLeading)
+            }
+        }
+        .padding(.trailing, 12)
+    }
+
+    private func renderedViewports(viewportHeight: CGFloat) -> [RuneLargeTextViewport] {
+        let visible = visibleViewport(viewportHeight: viewportHeight)
+        guard let target = pendingProgrammaticScrollLine, target > 0, target <= index.lineCount else { return [visible] }
+        let targetViewport = visibleViewport(viewportHeight: viewportHeight, offset: yOffset(for: target))
+        let visibleEnd = visible.startLine + visible.lines.count
+        let targetEnd = targetViewport.startLine + targetViewport.lines.count
+        if targetViewport.startLine <= visibleEnd && visible.startLine <= targetEnd {
+            let start = min(visible.startLine, targetViewport.startLine)
+            return [index.viewport(startLine: start, lineLimit: max(visibleEnd, targetEnd) - start)]
+        }
+        // Keep both the measured and destination windows mounted until geometry
+        // confirms the jump. A failed jump can no longer leave an empty viewport.
+        return [visible, targetViewport]
     }
 
     private func scrollAnchor(y: CGFloat, contentHeight: CGFloat, id: String) -> some View {
@@ -275,11 +298,11 @@ public struct RuneLargeTextSurface: View {
         .frame(width: 1, height: contentHeight, alignment: .topLeading)
     }
 
-    private func visibleViewport(viewportHeight: CGFloat) -> RuneLargeTextViewport {
+    private func visibleViewport(viewportHeight: CGFloat, offset: CGFloat? = nil) -> RuneLargeTextViewport {
         let overscan = 24
         let visibleLimit = max(1, Int(ceil(max(1, viewportHeight) / rowHeight)))
         let startLine = layout(viewportHeight: viewportHeight).viewportStartLine(
-            verticalOffset: Double(verticalOffset),
+            verticalOffset: Double(offset ?? verticalOffset),
             overscan: overscan
         )
         return index.viewport(startLine: startLine, lineLimit: visibleLimit + overscan * 2)
@@ -364,13 +387,9 @@ public struct RuneLargeTextSurface: View {
         pendingSearchScrollTask?.cancel()
         pendingProgrammaticScrollLine = nil
         guard let line = scrollTargetLine, line > 0, line <= index.lineCount else { return }
-        // The old measured offset can arrive before `scrollTo` runs. Keep the target window mounted until
-        // geometry confirms that the scroll view has actually reached it.
+        // Render the destination alongside the measured viewport until geometry
+        // confirms the jump, keeping both ends visible while scrollTo is pending.
         pendingProgrammaticScrollLine = line
-        let targetRenderOffset = yOffset(for: line)
-        if verticalOffset != targetRenderOffset {
-            verticalOffset = targetRenderOffset
-        }
         let targetID = matchScrollTargetID(for: line)
         let shouldAnimate = activeSearchRange != nil && !accessibilityReduceMotion
         pendingSearchScrollTask = Task { @MainActor in
@@ -403,7 +422,10 @@ public struct RuneLargeTextSurface: View {
     }
 
     private func bottomScrollTargetID(for line: Int) -> String {
-        "line-anchor-\(line)"
+        if scrollTargetLine == line {
+            return matchScrollTargetID(for: line)
+        }
+        return "line-anchor-\(line)"
     }
 }
 

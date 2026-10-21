@@ -7,6 +7,14 @@ import XCTest
 @MainActor
 final class PodInspectorWindowTests: XCTestCase {
     func testPodActivationReusesSeparateWindowAndKeepsLogsLiveAfterClosingAndReopening() async throws {
+        let defaults = UserDefaults.standard
+        let minutesKey = RuneSettingsKeys.logsRecentWindowMinutes
+        let savedMinutes = defaults.object(forKey: minutesKey)
+        defaults.runeRecentLogWindowMinutes = 7
+        defer {
+            if let savedMinutes { defaults.set(savedMinutes, forKey: minutesKey) }
+            else { defaults.removeObject(forKey: minutesKey) }
+        }
         let first = PodSummary(name: "payment-api-a", namespace: "payments", status: "Running", nodeName: "worker-a")
         let second = PodSummary(name: "payment-api-b", namespace: "payments", status: "Running", nodeName: "worker-b")
         let state = RuneAppState()
@@ -22,6 +30,7 @@ final class PodInspectorWindowTests: XCTestCase {
             viewModel: model,
             onLayoutSnapshotChange: { snapshots.append($0) },
             debugDisableBootstrap: true,
+            podInspectorPresentation: .window,
             shellVariant: .appKitSplitView,
             initialSidebarWidthOverride: 220
         ).frame(width: 1400, height: 900))
@@ -68,8 +77,22 @@ final class PodInspectorWindowTests: XCTestCase {
         XCTAssertTrue(initialLogView.string.contains("seq=1 ready"))
         XCTAssertTrue(model.isLogTailModeEnabled, "Opening a Pod must show live logs without requiring a Tail option.")
         let detailContent = try XCTUnwrap(detail.contentView)
+        XCTAssertEqual(model.selectedLogPreset, .recentMinutes)
+        XCTAssertEqual(model.selectedLogPreset.filter, .lastMinutes(7))
+        let minutesField = try XCTUnwrap(descendants(detailContent).compactMap { $0 as? NSTextField }.first {
+            $0.isEditable
+        })
+        XCTAssertEqual(minutesField.stringValue, "7")
+        XCTAssertTrue(detail.makeFirstResponder(minutesField))
+        minutesField.selectText(nil)
+        let editor = try XCTUnwrap(minutesField.currentEditor() as? NSTextView)
+        editor.insertText("3", replacementRange: NSRange(location: 0, length: editor.string.utf16.count))
+        detail.makeFirstResponder(nil)
+        try await settle(owner)
+        XCTAssertEqual(model.podLogWindowMinutes, 3)
+        XCTAssertEqual(minutesField.stringValue, "3")
         XCTAssertTrue(descendants(detailContent).compactMap { $0 as? NSPopUpButton }.isEmpty,
-                      "The Pod log window must not show source/filter options.")
+                      "Container and advanced filter menus must stay hidden in the Pod log window.")
         let logViewport = try XCTUnwrap(initialLogView.enclosingScrollView)
         XCTAssertGreaterThan(logViewport.bounds.height, detailContent.bounds.height * 0.85,
                              "Logs must occupy most of the window below the top tabs.")

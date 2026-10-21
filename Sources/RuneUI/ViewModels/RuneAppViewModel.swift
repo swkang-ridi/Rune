@@ -200,7 +200,7 @@ public struct WorkspacePortForwardBrowserOpener: PortForwardBrowserOpening {
 // namespace menu per context under `…/Rune/namespace-lists/` and hydrates before `listNamespaces` when RAM is empty.
 
 public enum PodLogPreset: String, CaseIterable, Identifiable, Sendable {
-    /// Default log preset in Rune: tail only (no time window), keeping responses small and avoiding huge transfers on busy pods.
+    /// Line-count preset retained for existing workspaces and advanced log views.
     case recentLines
     case last5Minutes
     case last15Minutes
@@ -212,12 +212,14 @@ public enum PodLogPreset: String, CaseIterable, Identifiable, Sendable {
     case largeTail
     case customOne
     case customTwo
+    case recentMinutes
 
     public var id: String { rawValue }
 
     public var title: String {
         switch self {
         case .recentLines: return "Recent (200 lines)"
+        case .recentMinutes: return "Recent \(UserDefaults.standard.runeRecentLogWindowMinutes)m"
         case .last5Minutes: return "Last 5m"
         case .last15Minutes: return "Last 15m"
         case .lastHour: return "Last 1h"
@@ -235,6 +237,7 @@ public enum PodLogPreset: String, CaseIterable, Identifiable, Sendable {
     public var filter: LogTimeFilter {
         switch self {
         case .recentLines: return .tailLines(200)
+        case .recentMinutes: return .lastMinutes(UserDefaults.standard.runeRecentLogWindowMinutes)
         case .last5Minutes: return .lastMinutes(5)
         case .last15Minutes: return .lastMinutes(15)
         case .lastHour: return .lastHours(1)
@@ -1187,6 +1190,14 @@ public final class RuneAppViewModel: ObservableObject {
     // The state instance never changes. Its own notifications are forwarded below.
     public let state: RuneAppState
     @Published public var selectedLogPreset: PodLogPreset = .recentLines
+    public var podLogWindowMinutes: Int {
+        get { UserDefaults.standard.runeRecentLogWindowMinutes }
+        set {
+            guard max(1, newValue) != podLogWindowMinutes else { return }
+            UserDefaults.standard.runeRecentLogWindowMinutes = newValue
+            handleUserDefaultsDidChange()
+        }
+    }
     @Published public var includePreviousLogs: Bool = false
     @Published public var selectedLogContainer: String = ""
     @Published public private(set) var pendingWriteDryRunStatus: String?
@@ -1514,6 +1525,11 @@ public final class RuneAppViewModel: ObservableObject {
     private var terminalOutputFlushTask: Task<Void, Never>?
     private var liveStatusUpdatesTask: Task<Void, Never>?
     private var livePodMetricsTask: Task<Void, Never>?
+    private var livePodAgeTask: Task<Void, Never>?
+    private var livePodNodeMetadataTask: Task<Void, Never>?
+    private var livePodNodeMetadataRequestID = UUID()
+    private var livePodNodeMetadataLastAttempt: Date?
+    private var livePodNodeMetadataRevision: UInt64 = 0
     private var livePodFlushTask: Task<Void, Never>?
     private var livePodInspectorRefreshTask: Task<Void, Never>?
     private var pendingLivePodChanges = LivePodWatchBatch()
@@ -1537,6 +1553,7 @@ public final class RuneAppViewModel: ObservableObject {
         UserDefaults.standard.runeCustomLogPresetConfig(slot: .one)
     private var observedCustomLogPresetTwo =
         UserDefaults.standard.runeCustomLogPresetConfig(slot: .two)
+    private var observedRecentLogWindowMinutes = UserDefaults.standard.runeRecentLogWindowMinutes
     private var pendingForcedNamespaceRefresh = false
     /// Set during context switch with no explicit namespace so first metadata refresh can override stale carry-over namespace.
     private var pendingNamespaceRevalidationContextName: String?
@@ -1917,6 +1934,14 @@ public final class RuneAppViewModel: ObservableObject {
         let customTwo = UserDefaults.standard.runeCustomLogPresetConfig(slot: .two)
         let customOneChanged = customOne != observedCustomLogPresetOne
         let customTwoChanged = customTwo != observedCustomLogPresetTwo
+        let recentMinutes = UserDefaults.standard.runeRecentLogWindowMinutes
+        if recentMinutes != observedRecentLogWindowMinutes {
+            observedRecentLogWindowMinutes = recentMinutes
+            objectWillChange.send()
+            if selectedLogPreset == .recentMinutes {
+                scheduleLogsReloadForSelection()
+            }
+        }
         observedCustomLogPresetOne = customOne
         observedCustomLogPresetTwo = customTwo
         if customOneChanged || customTwoChanged {
@@ -5618,7 +5643,11 @@ public final class RuneAppViewModel: ObservableObject {
             kind: kind,
             family: resourceListFamily(for: kind)
         )
-        if usesIncrementalPodWatch(scope) { startLivePodMetricsUpdates(scope) }
+        if usesIncrementalPodWatch(scope) {
+            startLivePodAgeUpdates(scope)
+            startLivePodMetricsUpdates(scope)
+            refreshLivePodNodeMetadataIfNeeded(scope)
+        }
         liveStatusUpdatesTask = Task { @MainActor [weak self] in
             guard let self else { return }
             await self.runLiveResourceWatch(scope)
@@ -5634,8 +5663,14 @@ public final class RuneAppViewModel: ObservableObject {
     }
 
     private func cancelLivePodFollowUps() {
+        livePodAgeTask?.cancel()
+        livePodAgeTask = nil
         livePodMetricsTask?.cancel()
         livePodMetricsTask = nil
+        livePodNodeMetadataTask?.cancel()
+        livePodNodeMetadataTask = nil
+        livePodNodeMetadataRequestID = UUID()
+        livePodNodeMetadataLastAttempt = nil
         livePodFlushTask?.cancel()
         livePodFlushTask = nil
         livePodInspectorRefreshTask?.cancel()
@@ -5672,11 +5707,66 @@ public final class RuneAppViewModel: ObservableObject {
         return true
     }
 
-    private func commitLivePods(_ pods: [PodSummary], scope: LiveResourceWatchScope) {
+    private func commitLivePods(_ pods: [PodSummary], scope: LiveResourceWatchScope, refreshNodeMetadata: Bool = true) {
         state.setPods(pods)
         state.setOverviewPods(pods)
         store.cachePods(pods, context: scope.context, namespace: scope.namespace)
         overviewSnapshotCache[Self.overviewCacheKey(contextName: scope.context.name, namespace: scope.namespace)]?.pods = pods
+        if refreshNodeMetadata {
+            refreshLivePodNodeMetadataIfNeeded(scope)
+        }
+    }
+
+    private func startLivePodAgeUpdates(_ scope: LiveResourceWatchScope) {
+        livePodAgeTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let self, self.liveResourceWatchScopeIsCurrent(scope), self.usesIncrementalPodWatch(scope) else { return }
+                let now = Date()
+                let pods = self.state.pods.map { $0.updatingAge(reference: now) }
+                if pods != self.state.pods {
+                    // Age is local display state, independent of watch traffic and
+                    // slow or unavailable metrics. Do not initiate any API requests.
+                    self.commitLivePods(pods, scope: scope, refreshNodeMetadata: false)
+                }
+                do { try await Task.sleep(for: .seconds(1)) } catch { return }
+            }
+        }
+    }
+
+    private func refreshLivePodNodeMetadataIfNeeded(_ scope: LiveResourceWatchScope) {
+        guard livePodNodeMetadataTask == nil,
+              liveResourceWatchScopeIsCurrent(scope), usesIncrementalPodWatch(scope) else { return }
+        let podNodes = Set(state.pods.compactMap(\.nodeName).filter { !$0.isEmpty })
+        guard !podNodes.isEmpty else { return }
+        let knownNodes = Set(state.nodes.map(\.name))
+        // New autoscaled Nodes need labels promptly. Otherwise refresh the shared
+        // metadata periodically, even when Pods do not emit any watch events.
+        let interval: TimeInterval = podNodes.isSubset(of: knownNodes) ? 15 : 1
+        let now = Date()
+        if let lastAttempt = livePodNodeMetadataLastAttempt,
+           now.timeIntervalSince(lastAttempt) < interval { return }
+        livePodNodeMetadataLastAttempt = now
+        let requestID = UUID()
+        livePodNodeMetadataRequestID = requestID
+        livePodNodeMetadataTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                if self.livePodNodeMetadataRequestID == requestID {
+                    self.livePodNodeMetadataTask = nil
+                }
+            }
+            do {
+                let nodes = try await self.kubeClient.listNodes(from: scope.sources, context: scope.context)
+                guard !Task.isCancelled, self.livePodNodeMetadataRequestID == requestID,
+                      self.liveResourceWatchScopeIsCurrent(scope), self.usesIncrementalPodWatch(scope) else { return }
+                self.store.cacheNodes(nodes, context: scope.context)
+                self.state.setNodes(nodes)
+                self.livePodNodeMetadataRevision &+= 1
+            } catch {
+                guard !Task.isCancelled, self.liveResourceWatchScopeIsCurrent(scope) else { return }
+                self.diagnostics.log("live Pod node metadata refresh failed: \(error.localizedDescription)")
+            }
+        }
     }
 
     private func startLivePodMetricsUpdates(_ scope: LiveResourceWatchScope) {
@@ -5684,6 +5774,7 @@ public final class RuneAppViewModel: ObservableObject {
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .seconds(3)) } catch { return }
                 guard let self, self.liveResourceWatchScopeIsCurrent(scope), self.usesIncrementalPodWatch(scope) else { return }
+                self.refreshLivePodNodeMetadataIfNeeded(scope)
                 do {
                     let usage = try await self.kubeClient.podResourceUsage(from: scope.sources, context: scope.context, namespace: scope.namespace)
                     guard !Task.isCancelled, self.liveResourceWatchScopeIsCurrent(scope) else { return }
@@ -8247,6 +8338,17 @@ public final class RuneAppViewModel: ObservableObject {
         }
     }
 
+    public func preparePodLogWindow(for pod: PodSummary? = nil, container: String? = nil) {
+        if selectedLogPreset != .recentMinutes { selectedLogPreset = .recentMinutes }
+        if includePreviousLogs { includePreviousLogs = false }
+        if let pod {
+            let preferred = container.flatMap { name in
+                name.isEmpty || pod.logContainerNames.contains(name) ? name : nil
+            } ?? defaultLogContainerName(for: pod)
+            if selectedLogContainer != preferred { selectedLogContainer = preferred }
+        }
+    }
+
     public func reloadLogsForSelection() {
         tailLogsReloadTask?.cancel()
         tailLogsReloadTask = nil
@@ -8312,7 +8414,8 @@ public final class RuneAppViewModel: ObservableObject {
                 switch kind {
                 case .pod:
                     guard let pod else { return }
-                    self.state.showCachedPodLogs(contextName: context.name, namespace: namespace, podName: pod.name)
+                    // Selection changes restore the warm cache. Background reads keep the
+                    // complete active snapshot visible until the next response arrives.
                     self.state.setLastLogFetchError(nil)
                     self.state.isLoadingLogs = true
                     defer {
@@ -8352,7 +8455,6 @@ public final class RuneAppViewModel: ObservableObject {
                     self.scheduleNextTailLogsReload()
                 case .service:
                     guard let service else { return }
-                    self.state.showCachedUnifiedLogs(contextName: context.name, namespace: namespace, kind: .service, resourceName: service.name)
                     self.state.setLastLogFetchError(nil)
                     self.state.isLoadingLogs = true
                     defer {
@@ -8384,7 +8486,6 @@ public final class RuneAppViewModel: ObservableObject {
                     self.scheduleNextTailLogsReload()
                 case .deployment:
                     guard let deployment else { return }
-                    self.state.showCachedUnifiedLogs(contextName: context.name, namespace: namespace, kind: .deployment, resourceName: deployment.name)
                     self.state.setLastLogFetchError(nil)
                     self.state.isLoadingLogs = true
                     defer {
@@ -12678,6 +12779,7 @@ public final class RuneAppViewModel: ObservableObject {
 
         try Task.checkCancellation()
 
+        let snapshotNodeMetadataRevision = livePodNodeMetadataRevision
         livePodSnapshotJournalRequestID = requestID
         livePodSnapshotJournal = LivePodWatchBatch()
         defer {
@@ -13312,7 +13414,7 @@ public final class RuneAppViewModel: ObservableObject {
         let loadedConfigMaps = unwrap(await configMapResult, label: "configmaps", fallback: cachedSnapshot.configMaps, warnings: &warnings)
         let loadedSecrets = unwrap(await secretResult, label: "secrets", fallback: cachedSnapshot.secrets, warnings: &warnings)
         let resolvedNodes = await nodeResult
-        let loadedNodes: [ClusterResourceSummary]
+        var loadedNodes: [ClusterResourceSummary]
         if plan.nodesForPodPlacement, !plan.nodes, case .failure = resolvedNodes {
             // Node labels supplement the Pod list. Restricted Node access must not fail the Pod list.
             loadedNodes = cachedNodes
@@ -13396,6 +13498,10 @@ public final class RuneAppViewModel: ObservableObject {
             livePodSnapshotJournal = LivePodWatchBatch()
         }
 
+        if livePodNodeMetadataRevision != snapshotNodeMetadataRevision {
+            // A slow snapshot must not replace newer Node labels fetched by Live.
+            loadedNodes = store.nodes(context: context)
+        }
         store.cacheNodes(loadedNodes, context: context)
         store.cachePersistentVolumes(loadedPVs, context: context)
         store.cacheStorageClasses(loadedStorageClasses, context: context)
@@ -14144,7 +14250,9 @@ public final class RuneAppViewModel: ObservableObject {
                     return
                 }
 
-                state.showCachedPodLogs(contextName: context.name, namespace: state.selectedNamespace, podName: pod.name)
+                if resourceDetailsRequestPreservingVisibleDocuments != requestID {
+                    state.showCachedPodLogs(contextName: context.name, namespace: state.selectedNamespace, podName: pod.name)
+                }
                 state.isLoadingLogs = true
                 defer {
                     if isCurrentResourceDetailsRequest(requestID) {
@@ -14196,7 +14304,11 @@ public final class RuneAppViewModel: ObservableObject {
                     if isCurrentResourceDetailsRequest(requestID),
                        livePodChangeRevision == podWatchRevision,
                        let currentPod = state.selectedPod, currentPod.id == pod.id {
-                        state.setSelectedPod(currentPod.mergingInspectorDetail(jsonPod))
+                        // Live list/watch payloads already contain full Pod metadata.
+                        // A later detail read must not restore an older Node assignment.
+                        if !isLiveStatusUpdatesEnabled || state.selectedSection != .workloads {
+                            state.setSelectedPod(currentPod.mergingInspectorDetail(jsonPod))
+                        }
                     }
                 case .failure:
                     break
@@ -14231,7 +14343,9 @@ public final class RuneAppViewModel: ObservableObject {
                     return
                 }
 
-                state.showCachedUnifiedLogs(contextName: context.name, namespace: state.selectedNamespace, kind: .service, resourceName: service.name)
+                if resourceDetailsRequestPreservingVisibleDocuments != requestID {
+                    state.showCachedUnifiedLogs(contextName: context.name, namespace: state.selectedNamespace, kind: .service, resourceName: service.name)
+                }
                 state.isLoadingLogs = true
                 defer {
                     if isCurrentResourceDetailsRequest(requestID) {
@@ -14287,7 +14401,9 @@ public final class RuneAppViewModel: ObservableObject {
                     return
                 }
 
-                state.showCachedUnifiedLogs(contextName: context.name, namespace: state.selectedNamespace, kind: .deployment, resourceName: deployment.name)
+                if resourceDetailsRequestPreservingVisibleDocuments != requestID {
+                    state.showCachedUnifiedLogs(contextName: context.name, namespace: state.selectedNamespace, kind: .deployment, resourceName: deployment.name)
+                }
                 state.isLoadingLogs = true
                 defer {
                     if isCurrentResourceDetailsRequest(requestID) {
@@ -15150,6 +15266,8 @@ public final class RuneAppViewModel: ObservableObject {
                 !state.resourceYAML.isEmpty
                     || !state.resourceYAMLBaseline.isEmpty
                     || !state.resourceDescribe.isEmpty
+                    || !state.podLogs.isEmpty
+                    || !state.unifiedServiceLogs.isEmpty
             )
             && (state.resourceDetailScope == nil || state.resourceDetailScope == scope)
         if canPreserveVisibleDocuments {

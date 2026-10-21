@@ -1112,6 +1112,8 @@ public struct RuneRootView: View {
     @State private var podInspectorTab: PodInspectorTab = .overview
     @State private var isPodInspectorWindowPresented = false
     @State private var podInspectorPresentationID: UUID?
+    @State private var podWorkspaceTabs: [PodWorkspaceTab] = []
+    @State private var selectedPodWorkspaceTabID: String?
     @State private var serviceInspectorTab: ServiceInspectorTab = .overview
     @State private var deploymentInspectorTab: DeploymentInspectorTab = .overview
     @State private var showsHistoricalDeploymentReplicaSets = false
@@ -1183,7 +1185,7 @@ public struct RuneRootView: View {
         viewModel: RuneAppViewModel,
         onLayoutSnapshotChange: ((RuneRootLayoutSnapshot) -> Void)?,
         debugDisableBootstrap: Bool,
-        podInspectorPresentation: RunePodInspectorPresentation = .window,
+        podInspectorPresentation: RunePodInspectorPresentation = .tabbed,
         debugDisableLayoutPersistence: Bool? = nil,
         initialPodInspectorTab: PodInspectorTab = .overview,
         initialServiceInspectorTab: ServiceInspectorTab = .overview,
@@ -1305,26 +1307,36 @@ public struct RuneRootView: View {
         .onChange(of: viewModel.state.selectedSection) { _, section in
             advanceLayoutGeneration()
             if section != .workloads { isPodInspectorWindowPresented = false }
+            if section != .workloads { selectPodWorkspaceTab(nil) }
             guard section == .overview, !overviewCardModules.isEmpty else { return }
             overviewCardSelectionIndex = min(overviewCardSelectionIndex, overviewCardModules.count - 1)
         }
         .onChange(of: viewModel.state.selectedWorkloadKind) { _, _ in
             advanceLayoutGeneration()
             if !isPodBrowser { isPodInspectorWindowPresented = false }
+            if !isPodBrowser { selectPodWorkspaceTab(nil) }
         }
         .onChange(of: viewModel.state.selectedContext?.name) { _, _ in
             isPodInspectorWindowPresented = false
+            clearPodWorkspaceTabs()
         }
         .onChange(of: viewModel.state.selectedNamespace) { _, _ in
             isPodInspectorWindowPresented = false
+            clearPodWorkspaceTabs()
         }
         .onChange(of: viewModel.state.selectedPod?.id) { _, id in
             if id == nil { isPodInspectorWindowPresented = false }
+            if id == nil || (selectedPodWorkspaceTabID != nil && selectedPodWorkspaceTabID != id) {
+                selectPodWorkspaceTab(nil)
+            }
         }
         .onChange(of: isPodInspectorWindowPresented) { _, isPresented in
             if !isPresented, podInspectorTab == .logs {
                 viewModel.isLogTailModeEnabled = false
             }
+        }
+        .onDisappear {
+            if isPodWorkspaceInspectorVisible { viewModel.isLogTailModeEnabled = false }
         }
     }
 
@@ -1333,11 +1345,18 @@ public struct RuneRootView: View {
         .modifier(helmSelectionSyncModifier)
         .onChange(of: podInspectorTab) { _, tab in
             syncSavedWorkspaceInspectorState()
-            if isPodBrowser, podInspectorPresentation == .window, isPodInspectorWindowPresented {
+            if podInspectorPresentation == .tabbed, selectedPodWorkspaceTabID != nil {
+                savePodWorkspaceInspectorTab()
+                syncPodWorkspaceLogPolling()
+                if tab != .logs { viewModel.refreshResourceInspectorOnly() }
+            } else if isPodBrowser, podInspectorPresentation == .window, isPodInspectorWindowPresented {
                 if tab != .logs { viewModel.refreshResourceInspectorOnly() }
             } else if tab == .logs {
                 viewModel.reloadLogsForSelection()
             }
+        }
+        .onChange(of: viewModel.selectedLogContainer) { _, _ in
+            if isPodWorkspaceInspectorVisible { savePodWorkspaceInspectorTab() }
         }
         .onChange(of: deploymentInspectorTab) { _, tab in
             syncSavedWorkspaceInspectorState()
@@ -1809,7 +1828,7 @@ public struct RuneRootView: View {
                     .help(viewModel.isSidebarVisible ? "Hide Sidebar" : "Show Sidebar")
 
                     Button {
-                        if isPodBrowser, podInspectorPresentation == .window {
+                        if isPodBrowser, podInspectorPresentation != .docked {
                             if let pod = viewModel.state.selectedPod { openPodInspector(pod) }
                         } else {
                             viewModel.toggleDetailPaneVisibility()
@@ -1817,7 +1836,7 @@ public struct RuneRootView: View {
                     } label: {
                         Image(systemName: "sidebar.right")
                     }
-                    .help(isPodBrowser && podInspectorPresentation == .window
+                    .help(isPodBrowser && podInspectorPresentation != .docked
                           ? "Open Pod Details" : viewModel.isDetailPaneVisible ? "Hide Inspector" : "Show Inspector")
 
                     Menu {
@@ -4134,7 +4153,17 @@ public struct RuneRootView: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
 
-            contentHeader
+            if isPodBrowser, podInspectorPresentation == .tabbed, !podWorkspaceTabs.isEmpty {
+                PodWorkspaceTabBar(
+                    tabs: podWorkspaceTabs,
+                    selectedID: selectedPodWorkspaceTabID,
+                    onSelect: selectPodWorkspaceTab,
+                    onClose: closePodWorkspaceTab
+                )
+                .frame(height: 34)
+            }
+
+            if !isPodWorkspaceInspectorVisible { contentHeader }
 
             Group {
                 switch viewModel.state.selectedSection {
@@ -5100,83 +5129,11 @@ public struct RuneRootView: View {
     private var workloadsContent: some View {
         switch viewModel.state.selectedWorkloadKind {
         case .pod:
-            let pods = viewModel.visiblePods
-            VStack(spacing: 0) {
-                resourceListGate(kindTitle: "Pods", visibleCount: pods.count) {
-                    AppKitPodTableView(
-                        pods: pods,
-                        selectedPodID: viewModel.state.selectedPod?.id,
-                        selectionRevision: viewModel.state.resourceSelectionRevision(for: .resource(.pod)),
-                        selectionRevisionAfterSelect: {
-                            viewModel.state.resourceSelectionRevision(for: .resource(.pod))
-                        },
-                        selectedPodIDs: viewModel.state.selectedPodIDs,
-                        sortColumn: viewModel.podSortColumn,
-                        sortAscending: viewModel.podSortAscending,
-                        nameColumnWidth: podNameColumnWidth,
-                        canApplyClusterMutations: viewModel.canApplyClusterMutations,
-                        isFavorite: { pod in
-                            viewModel.isFavoriteResource(kind: .pod, namespace: pod.namespace, name: pod.name)
-                        },
-                        onSelectPod: viewModel.selectPod,
-                        onToggleBulkSelection: viewModel.togglePodBulkSelection,
-                        onToggleSort: viewModel.togglePodSort,
-                        onNameColumnWidthChanged: commitPodNameColumnWidth,
-                        onToggleFavorite: { pod in
-                            viewModel.toggleFavoriteResource(kind: .pod, namespace: pod.namespace, name: pod.name)
-                        },
-                        onOpenLogs: { pod in
-                            openPodInspector(pod, tab: .logs)
-                        },
-                        onOpenExec: { pod in
-                            openPodInspector(pod, tab: .exec)
-                        },
-                        onOpenDescribe: { pod in
-                            openPodInspector(pod, tab: .describe)
-                        },
-                        onOpenYAML: { pod in
-                            openPodInspector(pod, tab: .yaml)
-                        },
-                        onDelete: { pod in
-                            viewModel.requestDeleteResource(kind: .pod, name: pod.name)
-                        },
-                        onOpenNode: openPodNodeDetails,
-                        onActivatePod: { openPodInspector($0) },
-                        nodePoolNamesByNode: viewModel.nodePoolNamesByNode
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .transaction { transaction in
-                        transaction.animation = nil
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                Divider().opacity(0.35)
-                HStack(spacing: 8) {
-                    if let freshness = currentResourceListFreshness {
-                        Circle()
-                            .fill(ResourceListFreshnessPresentation.color(for: freshness.status, palette: activeAppearanceTheme.palette))
-                            .frame(width: 5, height: 5)
-                            .accessibilityHidden(true)
-                        Text(ResourceListFreshnessPresentation.text(for: freshness.status))
-                            .help(freshness.message)
-                    }
-                    Spacer(minLength: 4)
-                    Text(viewModel.state.selectedPodIDs.isEmpty
-                         ? "\(pods.count) Pods"
-                         : "\(viewModel.state.selectedPodIDs.count) selected · \(pods.count) Pods")
-                        .monospacedDigit()
-                }
-                .font(.caption).foregroundStyle(.runeSecondary)
-                .padding(.horizontal, 12).padding(.vertical, 8)
+            if podInspectorPresentation == .tabbed {
+                podWorkspaceContent
+            } else {
+                podListContent
             }
-            .background(editorFill)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .overlay {
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(Color(nsColor: .separatorColor).opacity(0.3), lineWidth: 1)
-                    .allowsHitTesting(false)
-            }
-            .id("workloads:pods")
 
         case .deployment:
             let deployments = viewModel.visibleDeployments
@@ -5251,6 +5208,102 @@ public struct RuneRootView: View {
         case .event:
             EmptyView()
         }
+    }
+
+    private var podWorkspaceContent: some View {
+        ZStack {
+            podListContent
+                .opacity(isPodWorkspaceInspectorVisible ? 0 : 1)
+                .allowsHitTesting(!isPodWorkspaceInspectorVisible)
+                .accessibilityHidden(isPodWorkspaceInspectorVisible)
+            if isPodWorkspaceInspectorVisible {
+                podDetails
+                    .id(selectedPodWorkspaceTabID)
+                    .background(editorFill)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private var podListContent: some View {
+        let pods = viewModel.visiblePods
+        VStack(spacing: 0) {
+            resourceListGate(kindTitle: "Pods", visibleCount: pods.count) {
+                AppKitPodTableView(
+                    pods: pods,
+                    selectedPodID: viewModel.state.selectedPod?.id,
+                    selectionRevision: viewModel.state.resourceSelectionRevision(for: .resource(.pod)),
+                    selectionRevisionAfterSelect: {
+                        viewModel.state.resourceSelectionRevision(for: .resource(.pod))
+                    },
+                    selectedPodIDs: viewModel.state.selectedPodIDs,
+                    sortColumn: viewModel.podSortColumn,
+                    sortAscending: viewModel.podSortAscending,
+                    nameColumnWidth: podNameColumnWidth,
+                    canApplyClusterMutations: viewModel.canApplyClusterMutations,
+                    isFavorite: { pod in
+                        viewModel.isFavoriteResource(kind: .pod, namespace: pod.namespace, name: pod.name)
+                    },
+                    onSelectPod: viewModel.selectPod,
+                    onToggleBulkSelection: viewModel.togglePodBulkSelection,
+                    onToggleSort: viewModel.togglePodSort,
+                    onNameColumnWidthChanged: commitPodNameColumnWidth,
+                    onToggleFavorite: { pod in
+                        viewModel.toggleFavoriteResource(kind: .pod, namespace: pod.namespace, name: pod.name)
+                    },
+                    onOpenLogs: { pod in
+                        openPodInspector(pod, tab: .logs)
+                    },
+                    onOpenExec: { pod in
+                        openPodInspector(pod, tab: .exec)
+                    },
+                    onOpenDescribe: { pod in
+                        openPodInspector(pod, tab: .describe)
+                    },
+                    onOpenYAML: { pod in
+                        openPodInspector(pod, tab: .yaml)
+                    },
+                    onDelete: { pod in
+                        viewModel.requestDeleteResource(kind: .pod, name: pod.name)
+                    },
+                    onOpenNode: openPodNodeDetails,
+                    onActivatePod: { openPodInspector($0) },
+                    nodePoolNamesByNode: viewModel.nodePoolNamesByNode
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .transaction { transaction in
+                    transaction.animation = nil
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            Divider().opacity(0.35)
+            HStack(spacing: 8) {
+                if let freshness = currentResourceListFreshness {
+                    Circle()
+                        .fill(ResourceListFreshnessPresentation.color(for: freshness.status, palette: activeAppearanceTheme.palette))
+                        .frame(width: 5, height: 5)
+                        .accessibilityHidden(true)
+                    Text(ResourceListFreshnessPresentation.text(for: freshness.status))
+                        .help(freshness.message)
+                }
+                Spacer(minLength: 4)
+                Text(viewModel.state.selectedPodIDs.isEmpty
+                     ? "\(pods.count) Pods"
+                     : "\(viewModel.state.selectedPodIDs.count) selected · \(pods.count) Pods")
+                    .monospacedDigit()
+            }
+            .font(.caption).foregroundStyle(.runeSecondary)
+            .padding(.horizontal, 12).padding(.vertical, 8)
+        }
+        .background(editorFill)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay {
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.3), lineWidth: 1)
+                .allowsHitTesting(false)
+        }
+        .id("workloads:pods")
     }
 
     private var networkingPane: some View {
@@ -6179,11 +6232,25 @@ public struct RuneRootView: View {
                         podInspectorCoreInfo(pod)
                     },
                     tabs: {
-                    RuneBrowserTabBar(
-                        options: PodInspectorTab.allCases.map { (value: $0, title: $0.localizedTitle(appString)) },
-                        selection: $podInspectorTab,
-                        accessibilityLabel: "Inspector"
-                    )
+                        HStack(spacing: 12) {
+                            RuneBrowserTabBar(
+                                options: PodInspectorTab.allCases.map { (value: $0, title: $0.localizedTitle(appString)) },
+                                selection: $podInspectorTab,
+                                accessibilityLabel: "Inspector"
+                            )
+                            if podInspectorTab == .logs, podInspectorPresentation != .docked {
+                                if !pod.logContainerNames.isEmpty {
+                                    PodLogContainerControl(
+                                        pod: pod, selection: $viewModel.selectedLogContainer,
+                                        allContainersTitle: appString(.allContainers)
+                                    )
+                                }
+                                PodLogRecentMinutesControl(minutes: Binding(
+                                    get: { viewModel.podLogWindowMinutes },
+                                    set: { viewModel.podLogWindowMinutes = $0 }
+                                ))
+                            }
+                        }
                     },
                     actions: {
                         Button("Delete", role: .destructive) {
@@ -6208,7 +6275,7 @@ public struct RuneRootView: View {
                                 isLoadingResources: viewModel.state.isLoading,
                                 errorMessage: viewModel.state.lastLogFetchError,
                                 statusText: logStatusText,
-                                showsControls: podInspectorPresentation != .window,
+                                showsControls: podInspectorPresentation == .docked,
                                 containerOptions: viewModel.podLogContainerOptions,
                                 logText: viewModel.state.podLogs,
                                 readOnlyResetID: "podlogs:\(viewModel.state.selectedPod?.name ?? ""):\(viewModel.selectedLogPreset.id):\(viewModel.includePreviousLogs):\(viewModel.selectedLogContainer)",
@@ -6230,7 +6297,8 @@ public struct RuneRootView: View {
                                 onToggleStreamPause: { viewModel.toggleLogStreamPause() }
                             )
                             .onAppear {
-                                if podInspectorPresentation == .window {
+                                if podInspectorPresentation != .docked {
+                                    viewModel.preparePodLogWindow()
                                     viewModel.isLogStreamPaused = false
                                     viewModel.isLogTailModeEnabled = true
                                 }
@@ -7951,7 +8019,7 @@ public struct RuneRootView: View {
         case .content:
             if viewModel.state.selectedSection == .overview {
                 openSelectedOverviewCard()
-            } else if isPodBrowser, podInspectorPresentation == .window,
+            } else if isPodBrowser, podInspectorPresentation != .docked,
                       let pod = viewModel.state.selectedPod {
                 openPodInspector(pod)
             } else if showsDockedInspector {
@@ -9886,6 +9954,7 @@ public struct RuneRootView: View {
 
     private func openPodNodeDetails(_ pod: PodSummary) {
         isPodInspectorWindowPresented = false
+        selectPodWorkspaceTab(nil)
         genericResourceManifestTab = .describe
         viewModel.openPodNode(pod)
     }
@@ -9924,6 +9993,18 @@ public struct RuneRootView: View {
     }
 
     private func openPodInspector(_ pod: PodSummary, tab: PodInspectorTab? = nil) {
+        if podInspectorPresentation == .tabbed {
+            savePodWorkspaceInspectorTab()
+            let nextTab = tab ?? .logs
+            if let index = podWorkspaceTabs.firstIndex(where: { $0.id == pod.id }) {
+                podWorkspaceTabs[index].inspectorTab = nextTab
+            } else {
+                podWorkspaceTabs.append(PodWorkspaceTab(pod: pod, inspectorTab: nextTab))
+            }
+            selectPodWorkspaceTab(pod.id)
+            return
+        }
+        if podInspectorPresentation == .window { viewModel.preparePodLogWindow(for: pod) }
         podInspectorTab = tab ?? .logs
         if viewModel.state.selectedPod?.id != pod.id || viewModel.state.selectedWorkloadKind != .pod {
             viewModel.selectPod(pod)
@@ -9938,6 +10019,52 @@ public struct RuneRootView: View {
         } else {
             viewModel.isDetailPaneVisible = true
         }
+    }
+
+    private var isPodWorkspaceInspectorVisible: Bool {
+        isPodBrowser && podInspectorPresentation == .tabbed && selectedPodWorkspaceTabID != nil
+    }
+
+    private func savePodWorkspaceInspectorTab() {
+        guard let index = podWorkspaceTabs.firstIndex(where: { $0.id == selectedPodWorkspaceTabID }) else { return }
+        podWorkspaceTabs[index].inspectorTab = podInspectorTab
+        podWorkspaceTabs[index].logContainer = viewModel.selectedLogContainer
+    }
+
+    private func selectPodWorkspaceTab(_ id: String?) {
+        guard podInspectorPresentation == .tabbed else { return }
+        guard id != nil || selectedPodWorkspaceTabID != nil else { return }
+        if id != selectedPodWorkspaceTabID { savePodWorkspaceInspectorTab() }
+        viewModel.isLogTailModeEnabled = false
+        selectedPodWorkspaceTabID = id
+        guard let item = podWorkspaceTabs.first(where: { $0.id == id }) else { return }
+        podInspectorTab = item.inspectorTab
+        let pod = viewModel.state.pods.first(where: { $0.id == item.id }) ?? item.pod
+        viewModel.preparePodLogWindow(for: pod, container: item.logContainer)
+        if viewModel.state.selectedPod?.id != pod.id {
+            viewModel.selectPod(pod)
+        }
+        syncPodWorkspaceLogPolling()
+        if podInspectorTab != .logs { viewModel.refreshResourceInspectorOnly() }
+    }
+
+    private func syncPodWorkspaceLogPolling() {
+        guard podInspectorPresentation == .tabbed else { return }
+        viewModel.isLogTailModeEnabled = isPodWorkspaceInspectorVisible && podInspectorTab == .logs
+    }
+
+    private func closePodWorkspaceTab(_ id: String) {
+        guard let index = podWorkspaceTabs.firstIndex(where: { $0.id == id }) else { return }
+        let wasSelected = selectedPodWorkspaceTabID == id
+        podWorkspaceTabs.remove(at: index)
+        if wasSelected {
+            selectPodWorkspaceTab(podWorkspaceTabs.isEmpty ? nil : podWorkspaceTabs[min(index, podWorkspaceTabs.count - 1)].id)
+        }
+    }
+
+    private func clearPodWorkspaceTabs() {
+        selectPodWorkspaceTab(nil)
+        podWorkspaceTabs.removeAll()
     }
 
     private func podOverviewRow(title: String, value: String, symbol: String) -> some View {

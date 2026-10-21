@@ -581,18 +581,52 @@ private final class PlainManifestTextView: NSTextView {
     func setStringKeepingSelection(_ newValue: String) {
         let selected = selectedRanges
         pendingEditPresentation = nil
-        representedText = newValue
-        if contentStyle != .ansiLogs {
-            string = newValue
+        if !appendLogTextIfPossible(newValue) {
+            representedText = newValue
+            if contentStyle != .ansiLogs {
+                string = newValue
+            }
+            invalidateDocumentMetrics()
+            applyTextContainerInsets()
+            refreshLayout()
         }
-        invalidateDocumentMetrics()
-        applyTextContainerInsets()
-        refreshLayout()
         if !selected.isEmpty {
             selectedRanges = selected.map {
                 NSValue(range: clampedSelectionRange($0.rangeValue))
             }
         }
+    }
+
+    private func appendLogTextIfPossible(_ newValue: String) -> Bool {
+        guard contentStyle == .ansiLogs, !representedText.isEmpty,
+              newValue.utf8.starts(with: representedText.utf8),
+              let storage = textStorage else { return false }
+
+        // Format with the full ANSI state so color escapes spanning the appended
+        // boundary stay correct, but leave the existing native text storage intact.
+        let formatted = ResourceLogANSIFormatter.attributedString(
+            from: newValue,
+            font: currentBaseFont,
+            foreground: manifestPalette.foreground,
+            backgrounds: manifestPalette.textBackgrounds
+        )
+        guard formatted.string.utf8.starts(with: storage.string.utf8) else {
+            // An incomplete escape at the old boundary can change already visible text.
+            return false
+        }
+        clearSearchHighlights(in: storage)
+        lastAppliedSearchKey = ""
+        representedText = newValue
+        let suffixRange = NSRange(location: storage.length, length: formatted.length - storage.length)
+        if suffixRange.length > 0 {
+            storage.append(formatted.attributedSubstring(from: suffixRange))
+        }
+        invalidateDocumentMetrics()
+        applyTextContainerInsets()
+        updateDocumentSize()
+        invalidateIntrinsicContentSize()
+        needsDisplay = true
+        return true
     }
 
     override func shouldChangeText(

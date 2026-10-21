@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 
 enum RunePodInspectorPresentation {
+    case tabbed
     case window
     case docked
 }

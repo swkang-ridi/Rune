@@ -14,6 +14,8 @@ public enum RuneSettingsKeys {
     public static let backgroundPrefetchOtherContexts = "rune.settings.backgroundPrefetchOtherContexts"
     /// When true, Rune exposes a small in-memory demo cluster context and menu action for screenshots and first-run evaluation.
     public static let enableDemoCluster = "rune.settings.enableDemoCluster"
+    public static let logsRecentWindowMinutes = "rune.settings.logs.recentWindowMinutes"
+    public static let logsRecentWindowMinutesDefault = 5
     public static let logsCustomPresetOneMode = "rune.settings.logs.customPresetOne.mode"
     public static let logsCustomPresetOneLines = "rune.settings.logs.customPresetOne.lines"
     public static let logsCustomPresetOneTimeValue = "rune.settings.logs.customPresetOne.timeValue"
@@ -218,6 +220,11 @@ public struct RunePendingLaunchRequest: Equatable, Sendable {
 }
 
 public extension UserDefaults {
+    var runeRecentLogWindowMinutes: Int {
+        get { max(1, (object(forKey: RuneSettingsKeys.logsRecentWindowMinutes) as? Int) ?? RuneSettingsKeys.logsRecentWindowMinutesDefault) }
+        set { set(max(1, newValue), forKey: RuneSettingsKeys.logsRecentWindowMinutes) }
+    }
+
     var runePendingLaunchAction: RuneLaunchAction? {
         get {
             guard let raw = string(forKey: RuneSettingsKeys.pendingLaunchAction),

@@ -70,7 +70,10 @@ struct InspectorReadOnlyTextView: View {
                         placeholder: "No output",
                         scrollTargetLine: followsEndOfText ? resolvedLargeTextIndex.lineCount
                             : largeTextScrollTargetLine ?? searchTargetLine ?? navigationRequest?.line,
-                        scrollTargetRevision: followsEndOfText ? text.hashValue
+                        // Follow the snapshot that is actually mounted. Network text
+                        // can arrive before its index; moving earlier strands the
+                        // viewport at the old target when the new index is published.
+                        scrollTargetRevision: followsEndOfText ? resolvedLargeTextIndex.text.hashValue
                             : largeTextScrollTargetRevision
                                 ?? (searchTargetLine == nil ? navigationRequest?.sequence : searchNavigationRevision),
                         scrollsOnTargetLineChange: largeTextScrollsOnTargetLineChange,

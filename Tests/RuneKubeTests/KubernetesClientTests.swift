@@ -1017,6 +1017,14 @@ final class KubernetesClientTests: XCTestCase {
         XCTAssertEqual(pods.first?.logContainerNames, ["app", "sidecar", "setup", "debugger"])
         XCTAssertEqual(pods.first?.containerImagesLine, "example.test/api:v1, example.test/sidecar:v2")
         XCTAssertEqual(pods.first?.ownerReferencesLine, "ReplicaSet/api-7c9d8f6b5c")
+        let creationDate = try XCTUnwrap(pods.first?.creationDate)
+        XCTAssertEqual(pods.first?.updatingAge(reference: creationDate.addingTimeInterval(61)).ageDescription, "1m")
+        let item = try XCTUnwrap((JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any])?["items"] as? [[String: Any]]).first!
+        let single = try KubernetesOutputParser().parseSinglePodJSON(
+            namespace: "default", from: String(decoding: JSONSerialization.data(withJSONObject: item), as: UTF8.self)
+        )
+        XCTAssertEqual(single.creationDate, creationDate)
+        XCTAssertEqual(try KubernetesOutputParser().parsePodsListJSONAllNamespaces(from: raw).first?.creationDate, creationDate)
     }
 
     func testOutputParserProjectsIngressBackendServices() throws {
